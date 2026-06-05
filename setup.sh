@@ -179,7 +179,15 @@ install_prerequisites() {
     echo -e "${GREEN}[✓] PM2 is already installed globally.${NC}"
   else
     echo -e "${CYAN}[*] Installing PM2 process manager globally...${NC}"
-    sudo npm install -g pm2
+    if [ "$EUID" -eq 0 ]; then
+      npm install -g pm2
+    else
+      if sudo command -v npm >/dev/null 2>&1; then
+        sudo npm install -g pm2
+      else
+        sudo env "PATH=$PATH" npm install -g pm2
+      fi
+    fi
     echo -e "${GREEN}[✓] PM2 installed successfully.${NC}"
   fi
   
