@@ -1,0 +1,29 @@
+{
+  "name": "deployment-opensources",
+  "version": "1.0.0",
+  "description": "Backend PaaS Deployment Engine",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend && tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.11.2",
+    "dotenv": "^16.4.5",
+    "hono": "^4.4.7",
+    "systeminformation": "^5.22.9",
+    "uuid": "^9.0.1",
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.0",
+    "@types/node": "^20.14.2",
+    "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.5.10",
+    "tailwindcss": "^4.3.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  }
+}
