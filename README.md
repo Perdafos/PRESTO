@@ -33,10 +33,14 @@ chmod +x setup.sh
 
 The setup wizard will:
 1. Verify system compatibility and sudo privileges.
-2. Install **Node.js LTS (v20)**, **Git**, **Redis Server**, **Docker Engine**, **Caddy Server**, and **PM2** globally.
+2. Install **Node.js LTS (v20)**, **Git**, **Redis Server**, **Docker Engine**, **Caddy Server**, **PM2** globally, and **Cloudflare Tunnel (`cloudflared`)**.
 3. Guide you through configuring `.env` variables (e.g. ports, Redis settings) with automatic generation of secure, random cryptographic keys (`WEBHOOK_SECRET` and `ENCRYPTION_KEY`).
-4. Install npm dependencies and compile the frontend and backend.
-5. Launch the application in the background via **PM2** and save the process state.
+4. Provide exposure and routing configurations:
+   - **Direct Port Access**: Exposure via server IP on a dedicated port.
+   - **Caddy Reverse Proxy**: Automatic SSL certificate generation and domain routing (e.g., `https://presto.yourdomain.com`).
+   - **Cloudflare Tunnel (`cloudflared`)**: Direct, secure tunneling through Cloudflare using a Tunnel Token, avoiding open firewall ports.
+5. Install npm dependencies and compile the frontend and backend.
+6. Launch the application in the background via **PM2** and save the process state.
 
 ---
 

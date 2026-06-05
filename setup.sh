@@ -323,12 +323,138 @@ deploy_app() {
   pm2 status paas-engine
 }
 
+# Configure Caddy Reverse Proxy for a custom domain
+configure_caddy() {
+  local port="$1"
+  print_header "Caddy Reverse Proxy Setup"
+
+  read -rp "Enter the domain name for your PRESTO dashboard (e.g., presto.mycompany.com): " caddy_domain
+  if [ -z "$caddy_domain" ]; then
+    echo -e "${RED}[✗] No domain provided. Skipping Caddy routing config.${NC}"
+    return
+  fi
+
+  echo -e "${CYAN}[*] Configuring Caddy to proxy https://$caddy_domain -> http://localhost:$port...${NC}"
+
+  # Backup Caddyfile
+  if [ -f "/etc/caddy/Caddyfile" ]; then
+    sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak
+  fi
+
+  # Write configuration block
+  if grep -q "$caddy_domain" /etc/caddy/Caddyfile 2>/dev/null; then
+    echo -e "${YELLOW}[!] A config block for $caddy_domain already exists. Skipping append.${NC}"
+  else
+    sudo tee -a /etc/caddy/Caddyfile > /dev/null <<EOF
+
+# PRESTO Dashboard Reverse Proxy
+$caddy_domain {
+    reverse_proxy localhost:$port
+}
+EOF
+    echo -e "${GREEN}[✓] Appended proxy rule to /etc/caddy/Caddyfile.${NC}"
+  fi
+
+  echo -e "${CYAN}[*] Reloading Caddy...${NC}"
+  sudo systemctl reload caddy || sudo systemctl restart caddy
+  echo -e "${GREEN}[✓] Caddy proxy successfully updated and reloaded!${NC}"
+  
+  EXPOSE_DOMAIN="https://$caddy_domain"
+}
+
+# Install and configure Cloudflare Tunnel (cloudflared)
+configure_cloudflare_tunnel() {
+  local port="$1"
+  print_header "Cloudflare Tunnel (cloudflared) Setup"
+
+  echo -e "Cloudflare Tunnel allows you to expose your local PRESTO dashboard and apps"
+  echo -e "securely to the internet without opening firewall ports or using public IPs."
+  echo
+  echo -e "Step to get a token:"
+  echo -e " 1. Go to Cloudflare Zero Trust Dashboard (https://one.dash.cloudflare.com/)"
+  echo -e " 2. Navigate to Networks -> Tunnels -> Add a Tunnel"
+  echo -e " 3. Copy the 'Token' string from the command Cloudflare provides you."
+  echo
+
+  read -rp "Enter your Cloudflare Tunnel Token: " tunnel_token
+  if [ -z "$tunnel_token" ]; then
+    echo -e "${RED}[✗] No token provided. Skipping Cloudflare Tunnel setup.${NC}"
+    return
+  fi
+
+  # Install cloudflared if not present
+  if ! command_exists cloudflared; then
+    echo -e "${CYAN}[*] Installing Cloudflare Tunnel client (cloudflared)...${NC}"
+    sudo mkdir -p --mode=0755 /usr/share/keyrings
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+    echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared debian-stable main' | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+    sudo apt-get update -y
+    sudo apt-get install -y cloudflared
+    echo -e "${GREEN}[✓] cloudflared installed successfully.${NC}"
+  fi
+
+  echo -e "${CYAN}[*] Registering cloudflared system service...${NC}"
+  
+  # Uninstall service if it exists to avoid衝突
+  if systemctl is-active --quiet cloudflared 2>/dev/null; then
+    sudo systemctl stop cloudflared || true
+    sudo cloudflared service uninstall 2>/dev/null || true
+  fi
+
+  sudo cloudflared service install "$tunnel_token"
+  
+  echo -e "${CYAN}[*] Enabling and starting cloudflared...${NC}"
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now cloudflared
+
+  echo -e "${GREEN}[✓] Cloudflare Tunnel service is installed and running!${NC}"
+  echo -e "${YELLOW}[!] Make sure you map a hostname (e.g. presto.domain.com) to service 'http://localhost:$port' in Cloudflare Zero Trust.${NC}"
+  
+  EXPOSE_TUNNEL="Active (Check your Cloudflare Zero Trust panel for status)"
+}
+
+# Prompt user for Expose / Routing mode
+setup_expose_mode() {
+  print_header "Dashboard Exposure & Routing Options"
+  
+  # Read PORT from .env
+  local port="3000"
+  if [ -f ".env" ]; then
+    port=$(grep -E "^PORT=" .env | cut -d'=' -f2- || echo "3000")
+  fi
+
+  echo -e "Choose how you want to expose and access the PRESTO Dashboard:"
+  echo -e "  [1] Direct Port Access (Access via http://<server-ip>:$port)"
+  echo -e "  [2] Caddy Reverse Proxy (Access via https://your-domain.com with automatic SSL)"
+  echo -e "  [3] Cloudflare Tunnel (Expose securely through cloudflared Tunnel Token)"
+  echo -e "  [4] Skip Expose Setup"
+  echo
+  read -rp "Enter choice [1-4]: " expose_choice
+
+  case "$expose_choice" in
+    1)
+      # Direct port
+      IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
+      EXPOSE_DOMAIN="http://$IP_ADDR:$port"
+      ;;
+    2)
+      configure_caddy "$port"
+      ;;
+    3)
+      configure_cloudflare_tunnel "$port"
+      ;;
+    *)
+      echo -e "${YELLOW}[!] Expose setup skipped. Dashboard port is $port.${NC}"
+      ;;
+  esac
+}
+
 # Final Summary Dashboard
 print_summary() {
   # Retrieve local IP
   IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
   
-  # Read PORT from .env
+  # Read settings from .env
   PORT=$(grep -E "^PORT=" .env | cut -d'=' -f2- || echo "3000")
   WEBHOOK_SECRET=$(grep -E "^WEBHOOK_SECRET=" .env | cut -d'=' -f2- || echo "")
   ENCRYPTION_KEY=$(grep -E "^ENCRYPTION_KEY=" .env | cut -d'=' -f2- || echo "")
@@ -337,21 +463,37 @@ print_summary() {
   
   echo -e "${GREEN}${BOLD}Congratulations! PRESTO has been successfully set up and is running.${NC}"
   echo -e "\n${BOLD}----------------- SYSTEM ENDPOINTS -----------------${NC}"
-  echo -e "  Dashboard Panel:     ${CYAN}${BOLD}http://${IP_ADDR}:${PORT}${NC}"
+  if [ -n "$EXPOSE_DOMAIN" ]; then
+    echo -e "  Dashboard URL:       ${CYAN}${BOLD}${EXPOSE_DOMAIN}${NC}"
+  else
+    echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}:${PORT}${NC}"
+  fi
+  
+  if [ -n "$EXPOSE_TUNNEL" ]; then
+    echo -e "  Cloudflare Tunnel:   ${GREEN}${BOLD}${EXPOSE_TUNNEL}${NC}"
+  fi
+  
   echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}:${PORT}/webhook/github${NC}"
   echo -e "  Webhook Secret:      ${YELLOW}${WEBHOOK_SECRET}${NC}"
   echo -e "  DB Encryption Key:   ${YELLOW}${ENCRYPTION_KEY}${NC}"
   echo -e "${BOLD}----------------------------------------------------${NC}"
   
-  echo -e "\n${BOLD}Required Manual Post-install Steps:${NC}"
+  echo -e "\n${BOLD}Required Manual Post-install Steps & Tips:${NC}"
   echo -e " 1. ${YELLOW}Docker Permissions:${NC} Run ${CYAN}newgrp docker${NC} or log out and back in"
   echo -e "    for your user to execute docker commands without sudo."
   echo -e " 2. ${YELLOW}Automatic Boot Persistence:${NC} Run the following command to configure"
   echo -e "    PM2 startup behavior on server restart:"
   echo -e "    ${CYAN}pm2 startup${NC}"
   echo -e "    (Then copy/paste the command printed by PM2 into your terminal)"
-  echo -e " 3. ${YELLOW}Caddy Reverse Proxy:${NC} Make sure ports 80 and 443 are open"
-  echo -e "    so Caddy can issue SSL certificates and proxy traffic to your apps."
+  
+  if [ -n "$EXPOSE_TUNNEL" ]; then
+    echo -e " 3. ${YELLOW}Cloudflare Tunnel for Sub-projects:${NC}"
+    echo -e "    If you want your deployed apps (e.g. *.yourdomain.com) also tunneled,"
+    echo -e "    create a wildcard hostname rule in the Cloudflare Zero Trust Dashboard:"
+    echo -e "      - Hostname: ${CYAN}*.yourdomain.com${NC}"
+    echo -e "      - Service: ${CYAN}http://localhost:80${NC} (points to Caddy, which routes them dynamically!)"
+  fi
+  
   echo -e "\n${GREEN}PRESTO PaaS Engine is now ready to host your code!${NC}\n"
 }
 
@@ -361,13 +503,14 @@ main_menu() {
     print_banner
     echo -e " Please select an option:"
     echo -e "  [1] ${GREEN}${BOLD}Full Automated Installation (Recommended)${NC}"
-    echo -e "      (Install prerequisites, configure .env, build project, and deploy PM2)"
+    echo -e "      (Install prerequisites, configure .env, build project, configure expose, and deploy PM2)"
     echo -e "  [2] Install System Prerequisites Only"
     echo -e "  [3] Configure/Generate .env Only"
-    echo -e "  [4] Compile and Deploy/Restart Application Only"
-    echo -e "  [5] Exit Setup"
+    echo -e "  [4] Expose & Routing Configuration (Caddy / Cloudflare Tunnel)"
+    echo -e "  [5] Compile and Deploy/Restart Application Only"
+    echo -e "  [6] Exit Setup"
     echo
-    read -rp " Enter option [1-5]: " option
+    read -rp " Enter option [1-6]: " option
 
     case "$option" in
       1)
@@ -375,6 +518,7 @@ main_menu() {
         install_prerequisites
         configure_env
         build_project
+        setup_expose_mode
         deploy_app
         print_summary
         break
@@ -389,16 +533,20 @@ main_menu() {
         read -n 1 -s -r -p "Configuration saved. Press any key to return to menu..."
         ;;
       4)
+        setup_expose_mode
+        read -n 1 -s -r -p "Expose settings configured. Press any key to return to menu..."
+        ;;
+      5)
         build_project
         deploy_app
         read -n 1 -s -r -p "Application compiled and deployed. Press any key to return to menu..."
         ;;
-      5)
+      6)
         echo -e "\n${YELLOW}Exiting Setup Wizard. Goodbye!${NC}\n"
         exit 0
         ;;
       *)
-        echo -e "\n${RED}[✗] Invalid option, please select 1 to 5.${NC}"
+        echo -e "\n${RED}[✗] Invalid option, please select 1 to 6.${NC}"
         sleep 1.5
         ;;
     esac
