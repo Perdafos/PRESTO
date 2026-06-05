@@ -25,8 +25,8 @@ The engine includes a built-in clean architecture adapter layer that runs in eit
 Clone the repository and install the dependencies:
 
 ```bash
-git clone https://github.com/your-username/paas-deployment-engine.git
-cd paas-deployment-engine
+git clone https://github.com/Perdafos/PRESTO.git
+cd PRESTO
 npm install
 ```
 
