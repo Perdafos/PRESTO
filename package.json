@@ -7,7 +7,8 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "dev:frontend": "npm run dev --prefix frontend",
     "build": "npm run build --prefix frontend && tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "postinstall": "npm install --prefix frontend"
   },
   "dependencies": {
     "@hono/node-server": "^1.11.2",

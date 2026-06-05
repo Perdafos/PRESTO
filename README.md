@@ -20,26 +20,45 @@ The engine includes a built-in clean architecture adapter layer that runs in eit
 
 ## Getting Started
 
-### 1. Installation
+### Method A: Automated Installation (Recommended for Servers)
 
-Clone the repository and install the dependencies:
+We provide an interactive **Server Setup Wizard** that automates the installation of all system prerequisites, environment configurations, and PM2 deployment.
 
+Run the following command on your Ubuntu/Debian server:
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+The setup wizard will:
+1. Verify system compatibility and sudo privileges.
+2. Install **Node.js LTS (v20)**, **Git**, **Redis Server**, **Docker Engine**, **Caddy Server**, and **PM2** globally.
+3. Guide you through configuring `.env` variables (e.g. ports, Redis settings) with automatic generation of secure, random cryptographic keys (`WEBHOOK_SECRET` and `ENCRYPTION_KEY`).
+4. Install npm dependencies and compile the frontend and backend.
+5. Launch the application in the background via **PM2** and save the process state.
+
+---
+
+### Method B: Manual Installation (For Local Sandbox & Testing)
+
+If you prefer to install packages manually or are running in local sandboxing mode:
+
+#### 1. Installation
+Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/Perdafos/PRESTO.git
 cd PRESTO
 npm install
 ```
 
-### 2. Environment Configuration
-
+#### 2. Environment Configuration
 Copy the example environment file:
-
 ```bash
 cp .env.example .env
 ```
 
-Configure your variables inside `.env`:
-
+Configure the environment variables inside `.env`:
 ```env
 PORT=3000
 WEBHOOK_SECRET=your_github_webhook_secret
@@ -53,8 +72,7 @@ REDIS_PORT=6379
 
 ## Modes of Operation
 
-### Mode A: Simulation Mode (`SIMULATION_MODE=true`)
-
+### Mode 1: Simulation Mode (`SIMULATION_MODE=true`)
 Designed for local sandboxing, developer testing, and demo presentations. It runs immediately on any OS (including Windows, macOS, and Linux) without requiring external services.
 
 - **Queue**: Uses an in-memory event-driven queue mirroring BullMQ.
@@ -68,20 +86,13 @@ npm run dev
 ```
 Open your browser at `http://localhost:3000`.
 
-### Mode B: Production Mode (`SIMULATION_MODE=false`)
-
+### Mode 2: Production Mode (`SIMULATION_MODE=false`)
 Designed for live deployments on Ubuntu Server. It executes real commands, builds real Docker images, and updates your proxy configuration.
 
 #### System Prerequisites (Ubuntu Server)
-
-1. **Git**:
-   ```bash
-   sudo apt install -y git
-   ```
-2. **Redis** (for BullMQ queues):
-   ```bash
-   sudo apt install -y redis-server
-   ```
+If not using the automated `setup.sh` script, install these packages manually:
+1. **Git**: `sudo apt install -y git`
+2. **Redis**: `sudo apt install -y redis-server`
 3. **Docker Engine**:
    ```bash
    sudo apt install -y docker.io
@@ -89,7 +100,7 @@ Designed for live deployments on Ubuntu Server. It executes real commands, build
    newgrp docker
    docker network create paas_network
    ```
-4. **Caddy Server** (Admin API enabled on localhost:2019):
+4. **Caddy Server** (Admin API enabled on `localhost:2019`):
    ```bash
    sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -99,28 +110,16 @@ Designed for live deployments on Ubuntu Server. It executes real commands, build
    ```
 
 #### Run Production Server
-
 Compile the Tailwind CSS styles and build the TypeScript application:
-
 ```bash
 npm run build
 npm start
 ```
 
----
-
-## Process Management (PM2)
-
-For production environments, manage the server process using PM2 to handle automatic reboots and background logging:
-
+For production process management, it is recommended to run the app using PM2:
 ```bash
-# Install PM2 globally
 sudo npm install -g pm2
-
-# Start the compiled distribution
 pm2 start dist/index.js --name paas-engine
-
-# Configure PM2 to start on system boot
 pm2 startup
 pm2 save
 ```
