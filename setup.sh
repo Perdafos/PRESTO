@@ -67,6 +67,24 @@ check_and_fix_lxc_containerd() {
   if [ "$is_lxc" = true ]; then
     echo -e "${YELLOW}[!] LXC virtualization detected. Checking containerd compatibility...${NC}"
     
+    local dist="ubuntu"
+    if [ -f /etc/os-release ]; then
+      local os_id=$(grep -E "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
+      if [ "$os_id" = "debian" ] || [ "$os_id" = "raspbian" ]; then
+        dist="debian"
+      elif [ "$os_id" = "ubuntu" ]; then
+        dist="ubuntu"
+      else
+        # Try ID_LIKE fallback
+        local os_like=$(grep -E "^ID_LIKE=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
+        if [[ "$os_like" == *"debian"* ]]; then
+          dist="debian"
+        elif [[ "$os_like" == *"ubuntu"* ]]; then
+          dist="ubuntu"
+        fi
+      fi
+    fi
+
     local pkg_name=""
     if dpkg -s containerd.io >/dev/null 2>&1; then
       pkg_name="containerd.io"
@@ -84,14 +102,8 @@ check_and_fix_lxc_containerd() {
         
         # Ensure Docker official repository is added to get containerd.io
         if [ ! -f "/etc/apt/sources.list.d/docker.list" ]; then
-          echo -e "${CYAN}[*] Adding Docker official GPG key and repository...${NC}"
+          echo -e "${CYAN}[*] Adding Docker official GPG key and repository for $dist...${NC}"
           sudo mkdir -p /etc/apt/keyrings
-          
-          local dist="ubuntu"
-          if [ -f /etc/os-release ] && grep -q -i "debian" /etc/os-release; then
-            dist="debian"
-          fi
-          
           sudo curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
           sudo chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null || true
           
@@ -126,10 +138,6 @@ check_and_fix_lxc_containerd() {
             echo -e "${RED}[!] Could not find containerd.io=1.7.28-1 in apt cache. Attempting manual download & install...${NC}"
             # Attempt to download directly from Docker package pool
             local codename=$(lsb_release -cs)
-            local dist="ubuntu"
-            if [ -f /etc/os-release ] && grep -q -i "debian" /etc/os-release; then
-              dist="debian"
-            fi
             local arch=$(dpkg --print-architecture)
             
             # Form URL for direct download
