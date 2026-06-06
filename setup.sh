@@ -101,17 +101,18 @@ check_and_fix_lxc_containerd() {
         echo -e "${CYAN}[*] Preparing to install/downgrade to a safe version of containerd.io (1.7.28-1)...${NC}"
         
         # Ensure Docker official repository is added to get containerd.io
-        if [ ! -f "/etc/apt/sources.list.d/docker.list" ]; then
-          echo -e "${CYAN}[*] Adding Docker official GPG key and repository for $dist...${NC}"
-          sudo mkdir -p /etc/apt/keyrings
-          sudo curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
-          sudo chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null || true
-          
-          local codename=$(lsb_release -cs)
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$dist $codename stable" | \
-            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update -y
-        fi
+        # Delete old file to prevent 404 cache issues from previous wrong runs
+        sudo rm -f /etc/apt/sources.list.d/docker.list
+        
+        echo -e "${CYAN}[*] Adding Docker official GPG key and repository for $dist...${NC}"
+        sudo mkdir -p /etc/apt/keyrings
+        sudo curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
+        sudo chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null || true
+        
+        local codename=$(lsb_release -cs)
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$dist $codename stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -y
         
         # Check safe containerd.io version in apt cache
         local pkg_ver=$(apt-cache madison containerd.io | grep "1.7.28-1" | head -n1 | awk '{print $3}' || true)
