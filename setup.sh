@@ -56,6 +56,50 @@ check_system() {
   fi
 }
 
+setup_docker_repo() {
+  local dist="ubuntu"
+  if [ -f /etc/os-release ]; then
+    local os_id=$(grep -E "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
+    if [ "$os_id" = "debian" ] || [ "$os_id" = "raspbian" ]; then
+      dist="debian"
+    elif [ "$os_id" = "ubuntu" ]; then
+      dist="ubuntu"
+    else
+      local os_like=$(grep -E "^ID_LIKE=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
+      if [[ "$os_like" == *"debian"* ]]; then
+        dist="debian"
+      elif [[ "$os_like" == *"ubuntu"* ]]; then
+        dist="ubuntu"
+      fi
+    fi
+  fi
+
+  echo -e "${CYAN}[*] Setting up official Docker Apt repository for $dist...${NC}"
+  
+  # Remove any legacy sources list file that might cause 404s
+  sudo rm -f /etc/apt/sources.list.d/docker.list
+
+  # Install GPG key
+  sudo mkdir -p /etc/apt/keyrings
+  sudo curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
+  sudo chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null || true
+
+  # Add official sources list
+  local codename=""
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    codename="$VERSION_CODENAME"
+  fi
+  if [ -z "$codename" ]; then
+    codename=$(lsb_release -cs)
+  fi
+
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$dist $codename stable" | \
+    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  
+  sudo apt-get update -y
+}
+
 check_and_fix_lxc_containerd() {
   local is_lxc=false
   if [ -f /proc/1/environ ] && grep -q "container=lxc" /proc/1/environ; then
@@ -67,24 +111,6 @@ check_and_fix_lxc_containerd() {
   if [ "$is_lxc" = true ]; then
     echo -e "${YELLOW}[!] LXC virtualization detected. Checking containerd compatibility...${NC}"
     
-    local dist="ubuntu"
-    if [ -f /etc/os-release ]; then
-      local os_id=$(grep -E "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
-      if [ "$os_id" = "debian" ] || [ "$os_id" = "raspbian" ]; then
-        dist="debian"
-      elif [ "$os_id" = "ubuntu" ]; then
-        dist="ubuntu"
-      else
-        # Try ID_LIKE fallback
-        local os_like=$(grep -E "^ID_LIKE=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
-        if [[ "$os_like" == *"debian"* ]]; then
-          dist="debian"
-        elif [[ "$os_like" == *"ubuntu"* ]]; then
-          dist="ubuntu"
-        fi
-      fi
-    fi
-
     local pkg_name=""
     if dpkg -s containerd.io >/dev/null 2>&1; then
       pkg_name="containerd.io"
@@ -100,19 +126,17 @@ check_and_fix_lxc_containerd() {
         echo -e "${YELLOW}[!] Problematic containerd version ($version) detected inside LXC.${NC}"
         echo -e "${CYAN}[*] Preparing to install/downgrade to a safe version of containerd.io (1.7.28-1)...${NC}"
         
+        # Resolve dist name
+        local dist="ubuntu"
+        if [ -f /etc/os-release ]; then
+          local os_id=$(grep -E "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
+          if [ "$os_id" = "debian" ] || [ "$os_id" = "raspbian" ]; then
+            dist="debian"
+          fi
+        fi
+
         # Ensure Docker official repository is added to get containerd.io
-        # Delete old file to prevent 404 cache issues from previous wrong runs
-        sudo rm -f /etc/apt/sources.list.d/docker.list
-        
-        echo -e "${CYAN}[*] Adding Docker official GPG key and repository for $dist...${NC}"
-        sudo mkdir -p /etc/apt/keyrings
-        sudo curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
-        sudo chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null || true
-        
-        local codename=$(lsb_release -cs)
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$dist $codename stable" | \
-          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update -y
+        setup_docker_repo
         
         # Check safe containerd.io version in apt cache
         local pkg_ver=$(apt-cache madison containerd.io | grep "1.7.28-1" | head -n1 | awk '{print $3}' || true)
@@ -177,27 +201,96 @@ install_docker() {
   # Install prerequisites
   sudo apt-get install -y curl gnupg ca-certificates lsb-release
 
+  # Check if we are inside LXC
+  local is_lxc=false
+  if [ -f /proc/1/environ ] && grep -q "container=lxc" /proc/1/environ; then
+    is_lxc=true
+  elif command_exists systemd-detect-virt && systemd-detect-virt --container | grep -q "lxc"; then
+    is_lxc=true
+  fi
+
+  # Set up the official repository
+  setup_docker_repo
+
   # Install Docker if not present
   if command_exists docker; then
     echo -e "${GREEN}[✓] Docker is already installed.${NC}"
+    if [ "$is_lxc" = true ]; then
+      check_and_fix_lxc_containerd
+    fi
   else
-    echo -e "${CYAN}[*] Installing Docker Engine...${NC}"
-    sudo apt-get install -y docker.io
-    sudo systemctl enable --now docker
-    echo -e "${GREEN}[✓] Docker installed successfully.${NC}"
+    if [ "$is_lxc" = true ]; then
+      echo -e "${YELLOW}[!] LXC virtualization detected. Installing Docker with pinned containerd.io...${NC}"
+      # Remove any conflicting packages
+      sudo apt-get remove -y containerd runc docker.io docker-doc docker-compose-v2 podman-docker docker-ce docker-ce-cli 2>/dev/null || true
+      
+      # Determine safe version of containerd.io (1.7.28-1)
+      local pkg_ver=$(apt-cache madison containerd.io | grep "1.7.28-1" | head -n1 | awk '{print $3}' || true)
+      if [ -z "$pkg_ver" ]; then
+        pkg_ver=$(apt-cache madison containerd.io | grep -oE "1\.7\.28-1~[a-zA-Z0-9\.]+" | head -n1 || true)
+      fi
+
+      if [ -n "$pkg_ver" ]; then
+        echo -e "${CYAN}[*] Installing docker-ce, docker-ce-cli, and containerd.io ($pkg_ver)...${NC}"
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io="$pkg_ver"
+        sudo apt-mark hold containerd.io
+        sudo systemctl enable --now docker
+        echo -e "${GREEN}[✓] Docker installed with pinned containerd.io successfully.${NC}"
+      else
+        # Fallback to direct download
+        echo -e "${YELLOW}[!] Safe version not found in Apt cache. Downloading containerd.io 1.7.28-1 manually...${NC}"
+        local dist="ubuntu"
+        if [ -f /etc/os-release ]; then
+          local os_id=$(grep -E "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"'\' | tr '[:upper:]' '[:lower:]')
+          if [ "$os_id" = "debian" ] || [ "$os_id" = "raspbian" ]; then
+            dist="debian"
+          fi
+        fi
+        local codename=""
+        if [ -f /etc/os-release ]; then
+          . /etc/os-release
+          codename="$VERSION_CODENAME"
+        fi
+        if [ -z "$codename" ]; then
+          codename=$(lsb_release -cs)
+        fi
+        local arch=$(dpkg --print-architecture)
+        local dl_url="https://download.docker.com/linux/$dist/dists/$codename/pool/stable/$arch/containerd.io_1.7.28-1_amd64.deb"
+        if [ "$arch" != "amd64" ]; then
+          dl_url="https://download.docker.com/linux/$dist/dists/$codename/pool/stable/$arch/containerd.io_1.7.28-1_$arch.deb"
+        fi
+
+        wget -q -O /tmp/containerd.deb "$dl_url" || true
+        if [ -f /tmp/containerd.deb ]; then
+          sudo apt-get install -y docker-ce docker-ce-cli || true
+          sudo dpkg -i /tmp/containerd.deb || sudo apt-get install -f -y
+          sudo apt-mark hold containerd.io
+          sudo systemctl enable --now docker
+          echo -e "${GREEN}[✓] Docker installed with manually pinned containerd.io successfully.${NC}"
+        else
+          echo -e "${RED}[!] Direct download failed. Installing latest docker package...${NC}"
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+          sudo systemctl enable --now docker
+        fi
+      fi
+    else
+      echo -e "${CYAN}[*] Installing latest official Docker Engine...${NC}"
+      sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+      sudo systemctl enable --now docker
+      echo -e "${GREEN}[✓] Docker installed successfully.${NC}"
+    fi
   fi
 
-  # Install Docker Compose if not present
-  if command_exists docker-compose || docker compose version >/dev/null 2>&1; then
-    echo -e "${GREEN}[✓] Docker Compose is already installed.${NC}"
+  # Install Docker Compose
+  if docker compose version >/dev/null 2>&1; then
+    echo -e "${GREEN}[✓] Docker Compose (v2 plugin) is already installed.${NC}"
+  elif command_exists docker-compose; then
+    echo -e "${GREEN}[✓] Standalone Docker Compose is already installed.${NC}"
   else
-    echo -e "${CYAN}[*] Installing Docker Compose...${NC}"
-    sudo apt-get install -y docker-compose
+    echo -e "${CYAN}[*] Installing Docker Compose plugin...${NC}"
+    sudo apt-get install -y docker-compose-plugin || sudo apt-get install -y docker-compose
     echo -e "${GREEN}[✓] Docker Compose installed successfully.${NC}"
   fi
-
-  # Apply containerd LXC downgrade fix if needed
-  check_and_fix_lxc_containerd
 
   # Configure Docker Group
   if [ -n "$SUDO_USER" ]; then
