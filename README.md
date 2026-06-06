@@ -19,15 +19,22 @@ This engine is designed to be fully containerized using **Docker Compose** and *
 
 ## Getting Started
 
-The recommended way to run PRESTO in production is using Docker Compose.
+### Method A: Automated Installation (Recommended)
 
-### System Prerequisites
+We provide an interactive setup wizard script that handles system packages installation, environment configuration, database key generation, and launches everything via Docker Compose:
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+### Method B: Manual Installation (Docker Compose)
 
 Make sure your server has the following installed:
 1. **Docker**: `sudo apt install -y docker.io`
 2. **Docker Compose**: `sudo apt install -y docker-compose`
 
-### Installation Steps
+### Manual Steps
 
 1. **Clone the Repository**:
    ```bash
