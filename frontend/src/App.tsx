@@ -3,9 +3,7 @@ import {
   LayoutDashboard,
   Folder,
   FolderPlus,
-  Plug,
   Server,
-  Zap,
   Moon,
   Sun,
   Plus,
@@ -14,7 +12,6 @@ import {
   ListFilter,
   Terminal,
   Monitor,
-  HelpCircle,
   Lock,
   Globe,
   PlusCircle
