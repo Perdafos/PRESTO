@@ -23,7 +23,10 @@ import {
   CloudSun,
   Cloud,
   CloudRain,
-  CloudLightning
+  CloudLightning,
+  CheckCircle2,
+  XCircle,
+  Clock
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -420,6 +423,131 @@ export default function App() {
     return `${min}m ${remSec}s`;
   };
 
+  const getStageStatus = (stage: string, currentStatus: string) => {
+    const isFailed = currentStatus.endsWith('_failed');
+    const failedStage = isFailed ? currentStatus.replace('_failed', '') : '';
+
+    const stageMapping: Record<string, string[]> = {
+      'Checkout': ['cloning'],
+      'Detect': ['detecting'],
+      'Build': ['building'],
+      'Deploy': ['starting'],
+      'Health': ['health_checking'],
+      'Route': ['updating_routing']
+    };
+
+    const stageOrder = ['Checkout', 'Detect', 'Build', 'Deploy', 'Health', 'Route'];
+    const currentStageIdx = stageOrder.indexOf(stage);
+
+    let activeIdx = -1;
+    for (let i = 0; i < stageOrder.length; i++) {
+      const activePhases = stageMapping[stageOrder[i]];
+      if (activePhases.includes(currentStatus)) {
+        activeIdx = i;
+        break;
+      }
+    }
+
+    if (currentStatus === 'queued') {
+      return 'pending';
+    }
+
+    if (currentStatus === 'live') {
+      return 'success';
+    }
+
+    if (isFailed) {
+      const failedMap: Record<string, string> = {
+        'clone': 'Checkout',
+        'detect': 'Detect',
+        'build': 'Build',
+        'start': 'Deploy',
+        'health': 'Health',
+        'route': 'Route'
+      };
+      const failedStageName = failedMap[failedStage] || '';
+      const failedStageIdx = stageOrder.indexOf(failedStageName);
+
+      if (stage === failedStageName) {
+        return 'failed';
+      }
+      if (currentStageIdx < failedStageIdx) {
+        return 'success';
+      }
+      return 'pending';
+    }
+
+    if (activeIdx === -1) {
+      return 'success';
+    }
+
+    if (currentStageIdx < activeIdx) {
+      return 'success';
+    }
+    if (currentStageIdx === activeIdx) {
+      return 'running';
+    }
+    return 'pending';
+  };
+
+  const renderPipelineStages = (status: string) => {
+    const stages = ['Checkout', 'Detect', 'Build', 'Deploy', 'Health', 'Route'];
+    
+    return (
+      <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+        <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-1.5 font-mono">
+          <Activity className="w-3.5 h-3.5 text-blue-500" /> Pipeline Stage View
+        </h4>
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 md:gap-2 relative">
+          {stages.map((stage, idx) => {
+            const stageStatus = getStageStatus(stage, status);
+            return (
+              <React.Fragment key={stage}>
+                <div className="flex-1 flex flex-col items-center text-center p-3 rounded-lg border border-border/40 bg-muted/20 relative z-10 min-w-[100px]">
+                  <span className="text-[10px] text-muted-foreground font-mono font-bold uppercase tracking-wider mb-2">{stage}</span>
+                  
+                  <div className="relative flex items-center justify-center">
+                    {stageStatus === 'success' && (
+                      <div className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-500 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                    )}
+                    {stageStatus === 'failed' && (
+                      <div className="w-7 h-7 rounded-full bg-red-100 dark:bg-red-950/50 border border-red-500 flex items-center justify-center text-red-600 dark:text-red-400 animate-pulse">
+                        <XCircle className="w-4 h-4" />
+                      </div>
+                    )}
+                    {stageStatus === 'running' && (
+                      <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-950/50 border border-blue-500 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                        <Clock className="w-4 h-4 animate-spin" />
+                      </div>
+                    )}
+                    {stageStatus === 'pending' && (
+                      <div className="w-7 h-7 rounded-full bg-secondary border border-border flex items-center justify-center text-muted-foreground">
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/30"></span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <span className="text-[11px] font-semibold text-foreground mt-2">
+                    {stageStatus === 'success' && 'Completed'}
+                    {stageStatus === 'failed' && 'Failed'}
+                    {stageStatus === 'running' && 'In Progress'}
+                    {stageStatus === 'pending' && 'Pending'}
+                  </span>
+                </div>
+                
+                {idx < stages.length - 1 && (
+                  <div className="hidden md:block h-[1px] bg-border flex-1 mx-2"></div>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col w-full min-h-screen bg-background text-foreground">
       {/* Top Bar / Header */}
@@ -621,6 +749,8 @@ export default function App() {
 
                 {/* Build Console Logs Main Area */}
                 <div className="md:col-span-3 space-y-6">
+                  {renderPipelineStages(dep.status)}
+
                   <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
                     <div className="flex justify-between items-start pb-4 border-b border-border mb-4">
                       <div>
