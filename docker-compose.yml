@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   presto-redis:
     image: redis:alpine
@@ -51,6 +49,18 @@ services:
       - presto-app
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  presto-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: presto-tunnel
+    restart: unless-stopped
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    profiles:
+      - tunnel
+    depends_on:
+      - presto-nginx
 
 volumes:
   redis_data:

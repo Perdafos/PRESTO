@@ -332,11 +332,40 @@ configure_env() {
       PORT_RANGE_END=$(grep -E "^PORT_RANGE_END=" "$ENV_FILE" | cut -d'=' -f2- || echo "20000")
       WEBHOOK_SECRET=$(grep -E "^WEBHOOK_SECRET=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
       ENCRYPTION_KEY=$(grep -E "^ENCRYPTION_KEY=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+      DASHBOARD_DOMAIN=$(grep -E "^DASHBOARD_DOMAIN=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+      CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^CLOUDFLARE_TUNNEL_TOKEN=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+      COMPOSE_PROFILES=$(grep -E "^COMPOSE_PROFILES=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
       echo -e "${GREEN}[✓] Loaded existing defaults from .env.${NC}\n"
     fi
   fi
 
+  IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
+  DASHBOARD_DOMAIN=${DASHBOARD_DOMAIN:-$IP_ADDR}
+  CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-""}
+  COMPOSE_PROFILES=${COMPOSE_PROFILES:-""}
+
   echo -e "${CYAN}Please input configuration values (Press [Enter] to use defaults):${NC}\n"
+
+  # Custom IP/Domain Setup
+  read -rp "Enter manual IP or Domain for the Dashboard [Default: $DASHBOARD_DOMAIN]: " input_domain
+  DASHBOARD_DOMAIN=${input_domain:-$DASHBOARD_DOMAIN}
+
+  # Cloudflare Tunnel Exposure
+  local is_tunnel_default="N"
+  if [ "$COMPOSE_PROFILES" = "tunnel" ]; then
+    is_tunnel_default="Y"
+  fi
+  read -rp "Expose dashboard via Cloudflare Tunnel? (y/N) [Default: $is_tunnel_default]: " input_use_tunnel
+  local use_tunnel=${input_use_tunnel:-$is_tunnel_default}
+  
+  if [[ "$use_tunnel" =~ ^[Yy]$ ]]; then
+    read -rp "Enter Cloudflare Tunnel Token [Default: $CLOUDFLARE_TUNNEL_TOKEN]: " input_token
+    CLOUDFLARE_TUNNEL_TOKEN=${input_token:-$CLOUDFLARE_TUNNEL_TOKEN}
+    COMPOSE_PROFILES="tunnel"
+  else
+    CLOUDFLARE_TUNNEL_TOKEN=""
+    COMPOSE_PROFILES=""
+  fi
 
   # Build queue limits
   read -rp "Max Concurrent Builds [Default: $MAX_CONCURRENT_BUILDS]: " input_max_builds
@@ -396,6 +425,9 @@ REDIS_PORT=$REDIS_PORT
 MAX_CONCURRENT_BUILDS=$MAX_CONCURRENT_BUILDS
 PORT_RANGE_START=$PORT_RANGE_START
 PORT_RANGE_END=$PORT_RANGE_END
+DASHBOARD_DOMAIN=$DASHBOARD_DOMAIN
+CLOUDFLARE_TUNNEL_TOKEN=$CLOUDFLARE_TUNNEL_TOKEN
+COMPOSE_PROFILES=$COMPOSE_PROFILES
 
 # Nginx Configuration
 NGINX_CONF_DIR=/app/nginx/conf.d
@@ -410,28 +442,39 @@ EOF
 deploy_docker() {
   print_header "Step 3: Launching PRESTO with Docker Compose"
 
-  echo -e "${CYAN}[*] Starting Docker containers...${NC}"
+  # Load profiles if enabled
+  local profile_arg=""
+  if [ "$COMPOSE_PROFILES" = "tunnel" ]; then
+    profile_arg="--profile tunnel"
+  fi
+
+  echo -e "${CYAN}[*] Starting Docker containers (Profile: ${COMPOSE_PROFILES:-none})...${NC}"
   if command_exists docker-compose; then
-    sudo docker-compose up -d --build
+    sudo docker-compose $profile_arg up -d --build
   else
-    sudo docker compose up -d --build
+    sudo docker compose $profile_arg up -d --build
   fi
 
   echo -e "${GREEN}[✓] PRESTO containers are running!${NC}"
 }
 
 print_summary() {
-  IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
-  
+  DASHBOARD_DOMAIN=$(grep -E "^DASHBOARD_DOMAIN=" .env | cut -d'=' -f2-)
   WEBHOOK_SECRET=$(grep -E "^WEBHOOK_SECRET=" .env | cut -d'=' -f2-)
   ENCRYPTION_KEY=$(grep -E "^ENCRYPTION_KEY=" .env | cut -d'=' -f2-)
+  COMPOSE_PROFILES=$(grep -E "^COMPOSE_PROFILES=" .env | cut -d'=' -f2-)
 
   print_header "PRESTO PaaS Setup Completed!"
   
   echo -e "${GREEN}${BOLD}Congratulations! PRESTO has been successfully started via Docker.${NC}"
   echo -e "\n${BOLD}----------------- SYSTEM ENDPOINTS -----------------${NC}"
-  echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}${NC}"
-  echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}/webhook/github${NC}"
+  echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${DASHBOARD_DOMAIN}${NC}"
+  
+  if [ "$COMPOSE_PROFILES" = "tunnel" ]; then
+    echo -e "  Cloudflare Tunnel:   ${GREEN}${BOLD}Active (Routed via Cloudflare Zero Trust)${NC}"
+  fi
+  
+  echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${DASHBOARD_DOMAIN}/webhook/github${NC}"
   echo -e "  Webhook Secret:      ${YELLOW}${WEBHOOK_SECRET}${NC}"
   echo -e "  DB Encryption Key:   ${YELLOW}${ENCRYPTION_KEY}${NC}"
   echo -e "${BOLD}----------------------------------------------------${NC}"
