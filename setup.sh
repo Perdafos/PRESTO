@@ -317,6 +317,7 @@ configure_env() {
   PORT_RANGE_END="20000"
   WEBHOOK_SECRET=""
   ENCRYPTION_KEY=""
+  NGINX_PORT="80"
 
   # Try to read variables from existing .env if present
   if [ -f "$ENV_FILE" ]; then
@@ -332,7 +333,7 @@ configure_env() {
       PORT_RANGE_END=$(grep -E "^PORT_RANGE_END=" "$ENV_FILE" | cut -d'=' -f2- || echo "20000")
       WEBHOOK_SECRET=$(grep -E "^WEBHOOK_SECRET=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
       ENCRYPTION_KEY=$(grep -E "^ENCRYPTION_KEY=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
-      DASHBOARD_DOMAIN=$(grep -E "^DASHBOARD_DOMAIN=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+      NGINX_PORT=$(grep -E "^NGINX_PORT=" "$ENV_FILE" | cut -d'=' -f2- || echo "80")
       CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^CLOUDFLARE_TUNNEL_TOKEN=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
       COMPOSE_PROFILES=$(grep -E "^COMPOSE_PROFILES=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
       echo -e "${GREEN}[✓] Loaded existing defaults from .env.${NC}\n"
@@ -340,15 +341,15 @@ configure_env() {
   fi
 
   IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
-  DASHBOARD_DOMAIN=${DASHBOARD_DOMAIN:-$IP_ADDR}
+  NGINX_PORT=${NGINX_PORT:-"80"}
   CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-""}
   COMPOSE_PROFILES=${COMPOSE_PROFILES:-""}
 
   echo -e "${CYAN}Please input configuration values (Press [Enter] to use defaults):${NC}\n"
 
-  # Custom IP/Domain Setup
-  read -rp "Enter manual IP or Domain for the Dashboard [Default: $DASHBOARD_DOMAIN]: " input_domain
-  DASHBOARD_DOMAIN=${input_domain:-$DASHBOARD_DOMAIN}
+  # Custom Nginx Port Setup
+  read -rp "Enter Nginx Host Port [Default: $NGINX_PORT]: " input_port
+  NGINX_PORT=${input_port:-$NGINX_PORT}
 
   # Cloudflare Tunnel Exposure
   local is_tunnel_default="N"
@@ -425,7 +426,7 @@ REDIS_PORT=$REDIS_PORT
 MAX_CONCURRENT_BUILDS=$MAX_CONCURRENT_BUILDS
 PORT_RANGE_START=$PORT_RANGE_START
 PORT_RANGE_END=$PORT_RANGE_END
-DASHBOARD_DOMAIN=$DASHBOARD_DOMAIN
+NGINX_PORT=$NGINX_PORT
 CLOUDFLARE_TUNNEL_TOKEN=$CLOUDFLARE_TUNNEL_TOKEN
 COMPOSE_PROFILES=$COMPOSE_PROFILES
 
@@ -459,7 +460,8 @@ deploy_docker() {
 }
 
 print_summary() {
-  DASHBOARD_DOMAIN=$(grep -E "^DASHBOARD_DOMAIN=" .env | cut -d'=' -f2-)
+  IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
+  NGINX_PORT=$(grep -E "^NGINX_PORT=" .env | cut -d'=' -f2- || echo "80")
   WEBHOOK_SECRET=$(grep -E "^WEBHOOK_SECRET=" .env | cut -d'=' -f2-)
   ENCRYPTION_KEY=$(grep -E "^ENCRYPTION_KEY=" .env | cut -d'=' -f2-)
   COMPOSE_PROFILES=$(grep -E "^COMPOSE_PROFILES=" .env | cut -d'=' -f2-)
@@ -468,13 +470,24 @@ print_summary() {
   
   echo -e "${GREEN}${BOLD}Congratulations! PRESTO has been successfully started via Docker.${NC}"
   echo -e "\n${BOLD}----------------- SYSTEM ENDPOINTS -----------------${NC}"
-  echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${DASHBOARD_DOMAIN}${NC}"
-  
-  if [ "$COMPOSE_PROFILES" = "tunnel" ]; then
-    echo -e "  Cloudflare Tunnel:   ${GREEN}${BOLD}Active (Routed via Cloudflare Zero Trust)${NC}"
+  if [ "$NGINX_PORT" = "80" ]; then
+    echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}${NC}"
+    echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}/webhook/github${NC}"
+  else
+    echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}:${NGINX_PORT}${NC}"
+    echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}:${NGINX_PORT}/webhook/github${NC}"
   fi
   
-  echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${DASHBOARD_DOMAIN}/webhook/github${NC}"
+  if [ "$COMPOSE_PROFILES" = "tunnel" ]; then
+    echo -e "\n${BOLD}----------------- CLOUDFLARE TUNNEL INFO -----------------${NC}"
+    echo -e "  Cloudflare Tunnel:   ${GREEN}${BOLD}Active (Routed via Cloudflare Zero Trust)${NC}"
+    echo -e "  In your Cloudflare Zero Trust Dashboard, route your public hostname to:"
+    echo -e "  - Service Type:      ${CYAN}HTTP${NC}"
+    echo -e "  - Service URL/Port:  ${GREEN}${BOLD}http://presto-nginx:80${NC} (if using built-in tunnel container)"
+    echo -e "                       or ${GREEN}${BOLD}http://localhost:${NGINX_PORT}${NC} (if using host tunnel)"
+  fi
+  
+  echo -e "\n${BOLD}----------------- SECURITY KEYS -----------------${NC}"
   echo -e "  Webhook Secret:      ${YELLOW}${WEBHOOK_SECRET}${NC}"
   echo -e "  DB Encryption Key:   ${YELLOW}${ENCRYPTION_KEY}${NC}"
   echo -e "${BOLD}----------------------------------------------------${NC}"

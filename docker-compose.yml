@@ -41,7 +41,7 @@ services:
     container_name: presto-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "${NGINX_PORT:-80}:80"
     volumes:
       # Mount shared configurations folder
       - ./nginx/conf.d:/etc/nginx/conf.d
