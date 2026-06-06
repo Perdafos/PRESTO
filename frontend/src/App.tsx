@@ -9,12 +9,21 @@ import {
   Plus,
   Play,
   ExternalLink,
-  ListFilter,
   Terminal,
   Monitor,
-  Lock,
-  Globe,
-  PlusCircle
+  PlusCircle,
+  Settings,
+  History,
+  Activity,
+  Cpu,
+  HardDrive,
+  Search,
+  User,
+  ArrowLeft,
+  CloudSun,
+  Cloud,
+  CloudRain,
+  CloudLightning
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -63,13 +72,12 @@ interface EnvRow {
 
 export default function App() {
   // --- STATE ---
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'projects'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'build-history' | 'system-status'>('dashboard');
   const [projects, setProjects] = useState<Project[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [terminalStatus, setTerminalStatus] = useState<string>('IDLE');
-  const [terminalMeta, setTerminalMeta] = useState<string>('Select a deployment to view live logs');
   const [stats, setStats] = useState<SystemStats>({
     cpuLoad: 0,
     freeMem: '0.0 GB',
@@ -217,11 +225,10 @@ export default function App() {
       }));
     }
 
-    // Set terminal meta details
+    // Set terminal details
     const dep = deployments.find(d => d.id === selectedDeploymentId);
     const proj = dep ? projects.find(p => p.id === dep.project_id) : null;
     if (dep && proj) {
-      setTerminalMeta(`App: ${proj.name} | Commit: ${dep.commit_sha.substring(0, 7)} | Msg: "${dep.commit_message}"`);
       setTerminalLogs([]);
       setTerminalStatus(dep.status);
     }
@@ -284,7 +291,7 @@ export default function App() {
           port: ''
         });
         setEnvRows([{ key: '', value: '' }]);
-        setCurrentTab('projects');
+        setCurrentTab('dashboard');
         loadProjects();
       } else {
         const err = await res.json();
@@ -337,138 +344,561 @@ export default function App() {
     }
   };
 
+  // Helper: Get project deployments
+  const getProjectDeployments = (projectId: string) => {
+    return deployments.filter(d => d.project_id === projectId);
+  };
+
+  // Helper: Calculate Status Ball for a project
+  const getProjectStatus = (projectId: string) => {
+    const projDeps = getProjectDeployments(projectId);
+    if (projDeps.length === 0) return 'idle';
+
+    const sorted = [...projDeps].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const latest = sorted[0];
+
+    if (['queued', 'cloning', 'detecting', 'building', 'starting', 'health_checking', 'updating_routing'].includes(latest.status)) {
+      return 'building';
+    }
+    if (latest.status === 'live') {
+      return 'success';
+    }
+    if (latest.status.endsWith('_failed')) {
+      return 'failed';
+    }
+    return 'idle';
+  };
+
+  // Helper: Get Weather Icon & Description
+  const getProjectWeather = (projectId: string) => {
+    const projDeps = getProjectDeployments(projectId);
+    if (projDeps.length === 0) return { icon: <Sun className="w-5 h-5 text-amber-500" />, desc: 'No builds yet' };
+
+    const completed = projDeps
+      .filter(d => !['queued', 'cloning', 'detecting', 'building', 'starting', 'health_checking', 'updating_routing'].includes(d.status))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 5);
+
+    if (completed.length === 0) {
+      return { icon: <Sun className="w-5 h-5 text-amber-500" />, desc: 'No completed builds yet' };
+    }
+
+    const successes = completed.filter(d => d.status === 'live').length;
+    const ratio = successes / completed.length;
+
+    if (ratio === 1.0) {
+      return { icon: <Sun className="w-5 h-5 text-amber-500" />, desc: 'All recent builds successful' };
+    } else if (ratio >= 0.8) {
+      return { icon: <CloudSun className="w-5 h-5 text-zinc-400" />, desc: 'Most recent builds successful' };
+    } else if (ratio >= 0.5) {
+      return { icon: <Cloud className="w-5 h-5 text-zinc-400" />, desc: 'Some recent builds failed' };
+    } else if (ratio >= 0.2) {
+      return { icon: <CloudRain className="w-5 h-5 text-slate-400" />, desc: 'Many recent builds failed' };
+    } else {
+      return { icon: <CloudLightning className="w-5 h-5 text-red-500" />, desc: 'All recent builds failed' };
+    }
+  };
+
+  const getRelativeTime = (dateStr: string) => {
+    const elapsed = Date.now() - new Date(dateStr).getTime();
+    const sec = Math.floor(elapsed / 1000);
+    if (sec < 60) return 'Just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    return `${day}d ago`;
+  };
+
+  const formatDuration = (ms: number | null) => {
+    if (!ms) return 'N/A';
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    const remSec = sec % 60;
+    return `${min}m ${remSec}s`;
+  };
+
   return (
-    <div className="flex w-full min-h-screen">
-      {/* Sidebar */}
-      <aside className="w-64 bg-card border-r border-border p-6 flex flex-col justify-between shrink-0">
-        <div>
-          {/* Logo */}
-          <div className="flex items-center gap-3 mb-8 px-2">
-            <div className="p-1.5 bg-primary text-primary-foreground rounded-md">
-              <Server className="w-5 h-5" />
-            </div>
-            <h2 className="font-semibold text-lg tracking-tight">PaaS <span className="font-normal text-muted-foreground">Engine</span></h2>
+    <div className="flex flex-col w-full min-h-screen bg-background text-foreground">
+      {/* Top Bar / Header */}
+      <header className="flex justify-between items-center bg-card border-b border-border px-6 py-3 shrink-0 shadow-sm">
+        {/* Logo & Brand */}
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-blue-600 dark:bg-blue-700 text-white rounded">
+            <Server className="w-5 h-5 animate-pulse" />
           </div>
-
-          {/* Navigation Menu */}
-          <nav className="flex flex-col gap-1">
-            <button
-              onClick={() => setCurrentTab('dashboard')}
-              className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
-                currentTab === 'dashboard'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" /> Dashboard
-            </button>
-            <button
-              onClick={() => setCurrentTab('projects')}
-              className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
-                currentTab === 'projects'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
-              }`}
-            >
-              <Folder className="w-4 h-4" /> Projects
-            </button>
-          </nav>
+          <div className="flex flex-col">
+            <span className="font-bold text-sm tracking-tight text-foreground flex items-center gap-1.5">
+              Jenkins <span className="text-xs bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 font-normal px-1.5 py-0.5 rounded border border-blue-300 dark:border-blue-900">Presto CI/CD</span>
+            </span>
+            {/* Breadcrumbs */}
+            <div className="text-[10px] text-muted-foreground flex items-center gap-1 font-mono">
+              <span>Dashboard</span>
+              {currentTab !== 'dashboard' && (
+                <>
+                  <span>&rsaquo;</span>
+                  <span className="capitalize">{currentTab.replace('-', ' ')}</span>
+                </>
+              )}
+              {selectedDeploymentId && (
+                <>
+                  <span>&rsaquo;</span>
+                  <span>Build #{selectedDeploymentId.substring(0, 8)}</span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Engine Stats Widget */}
-        <div>
-          <div className="bg-muted border border-border rounded-xl p-4 mt-auto">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Engine Status</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="flex flex-col">
-                <span className="text-muted-foreground">CPU Load</span>
-                <span className="font-mono font-medium text-foreground">{(stats.cpuLoad * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-muted-foreground">Free RAM</span>
-                <span className="font-mono font-medium text-foreground">{stats.freeMem}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-muted-foreground">Active Jobs</span>
-                <span className="font-mono font-medium text-foreground">{stats.queueActive}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-muted-foreground">Waiting Jobs</span>
-                <span className="font-mono font-medium text-foreground">{stats.queueWaiting}</span>
-              </div>
-            </div>
+        {/* Search bar & Admin Menu */}
+        <div className="flex items-center gap-4">
+          <div className="relative hidden md:block">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search jobs..."
+              className="w-48 bg-muted border border-border rounded-lg pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            />
           </div>
-
-          {/* Copyright footer */}
-          <div className="mt-4 pt-3 border-t border-border text-center">
-            <p className="text-[10px] text-muted-foreground font-mono">Copyright &copy; 2026 Perdafos. All rights reserved.</p>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Content Area */}
-      <main className="flex-1 p-8 overflow-y-auto max-h-screen">
-        {/* Top Bar */}
-        <header className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">
-            {currentTab === 'dashboard' && 'PaaS Deployment Dashboard'}
-            {currentTab === 'projects' && 'Registered Projects'}
-          </h1>
           
-          <div className="flex items-center gap-3">
-            {/* Theme Toggle Button */}
-            <button
-              onClick={toggleTheme}
-              className="p-2 border border-border bg-card text-muted-foreground hover:text-foreground rounded-lg cursor-pointer"
-              title="Toggle Theme"
-            >
-              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            
-            {/* Create Project Button */}
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="bg-primary text-primary-foreground hover:bg-primary px-4 py-2 rounded-lg font-medium text-sm inline-flex items-center gap-2 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Create Project
-            </button>
-          </div>
-        </header>
+          {/* Theme Toggle Button */}
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 border border-border bg-card text-muted-foreground hover:text-foreground rounded cursor-pointer"
+            title="Toggle Theme"
+          >
+            {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+          </button>
 
-        {/* Tab content: Dashboard */}
-        {currentTab === 'dashboard' && (
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-            {/* Deployments list */}
-            <div className="xl:col-span-7 bg-card border border-border rounded-xl p-6 shadow-sm">
+          <div className="flex items-center gap-2 pl-2 border-l border-border">
+            <div className="w-6 h-6 rounded-full bg-secondary border border-border flex items-center justify-center">
+              <User className="w-3.5 h-3.5 text-muted-foreground" />
+            </div>
+            <span className="text-xs font-medium text-foreground hidden sm:inline">admin</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Sub-header content wrapper */}
+      <div className="flex flex-1 w-full overflow-hidden">
+        {/* Sidebar */}
+        <aside className="w-64 bg-card border-r border-border p-6 flex flex-col justify-between shrink-0 overflow-y-auto">
+          <div className="space-y-6">
+            {/* Navigation Menu */}
+            <nav className="flex flex-col gap-1">
+              <button
+                onClick={() => { setCurrentTab('dashboard'); setSelectedDeploymentId(null); }}
+                className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
+                  currentTab === 'dashboard' && !selectedDeploymentId
+                    ? 'bg-accent text-accent-foreground border-l-4 border-blue-500 pl-2'
+                    : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+                }`}
+              >
+                <LayoutDashboard className="w-4 h-4 text-blue-500" /> Dashboard
+              </button>
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer hover:bg-accent hover:text-accent-foreground text-muted-foreground"
+              >
+                <PlusCircle className="w-4 h-4 text-emerald-500" /> New Item
+              </button>
+              <button
+                onClick={() => { setCurrentTab('build-history'); setSelectedDeploymentId(null); }}
+                className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
+                  currentTab === 'build-history' && !selectedDeploymentId
+                    ? 'bg-accent text-accent-foreground border-l-4 border-blue-500 pl-2'
+                    : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+                }`}
+              >
+                <History className="w-4 h-4 text-amber-500" /> Build History
+              </button>
+              <button
+                onClick={() => { setCurrentTab('system-status'); setSelectedDeploymentId(null); }}
+                className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
+                  currentTab === 'system-status' && !selectedDeploymentId
+                    ? 'bg-accent text-accent-foreground border-l-4 border-blue-500 pl-2'
+                    : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+                }`}
+              >
+                <Settings className="w-4 h-4 text-zinc-500" /> Manage Jenkins
+              </button>
+            </nav>
+          </div>
+
+          {/* Build Queue & Executor Widget */}
+          <div className="space-y-4 pt-4 border-t border-border mt-6">
+            <div className="bg-muted border border-border rounded-lg p-3">
+              <h4 className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span>Build Queue</span>
+                <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[9px] font-mono font-bold">{stats.queueWaiting}</span>
+              </h4>
+              {stats.queueWaiting === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">No jobs in queue.</p>
+              ) : (
+                <div className="space-y-1">
+                  {Array.from({ length: stats.queueWaiting }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[11px] text-foreground font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                      <span>Pending build #{i + 1}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-muted border border-border rounded-lg p-3">
+              <h4 className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span>Build Executor Status</span>
+              </h4>
+              <div className="space-y-2 text-[11px]">
+                <div className="flex items-center justify-between border-b border-border/50 pb-1">
+                  <span className="text-muted-foreground font-mono">1. Master Host</span>
+                  {stats.queueActive > 0 ? (
+                    <span className="text-blue-500 dark:text-blue-400 font-medium animate-pulse inline-flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Building...
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic">Idle</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground font-mono">2. Agent Host</span>
+                  <span className="text-muted-foreground italic">Idle</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="text-[10px] text-muted-foreground font-mono space-y-0.5 border-t border-border pt-2">
+              <div>CPU Load: {(stats.cpuLoad * 100).toFixed(1)}%</div>
+              <div>Free RAM: {stats.freeMem}</div>
+            </div>
+            
+            <div className="text-center pt-2 border-t border-border/50">
+              <p className="text-[9px] text-muted-foreground font-mono">Copyright &copy; 2026 Perdafos. All rights reserved.</p>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main Content Area */}
+        <main className="flex-1 p-8 overflow-y-auto max-h-[calc(100vh-53px)] bg-muted/20">
+          
+          {/* Dedicated selected deployment logs screen */}
+          {selectedDeploymentId && (() => {
+            const dep = deployments.find(d => d.id === selectedDeploymentId);
+            const proj = dep ? projects.find(p => p.id === dep.project_id) : null;
+            if (!dep) return <div className="p-6">Deployment not found.</div>;
+            
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+                {/* Build Sidebar Options */}
+                <div className="md:col-span-1 space-y-2">
+                  <button
+                    onClick={() => setSelectedDeploymentId(null)}
+                    className="w-full bg-secondary hover:bg-secondary/80 text-secondary-foreground px-4 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-2 border border-border cursor-pointer justify-center"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
+                  </button>
+                  
+                  <div className="bg-card border border-border rounded-xl p-4 space-y-1 shadow-sm">
+                    <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 px-1">Build Menu</div>
+                    <button className="w-full text-left px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-accent-foreground flex items-center gap-2">
+                      <Terminal className="w-3.5 h-3.5 text-blue-500" /> Console Output
+                    </button>
+                    {dep.live_url && (
+                      <a
+                        href={dep.live_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full text-left px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 text-emerald-600 dark:text-emerald-400 hover:bg-accent"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Open Application
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Build Console Logs Main Area */}
+                <div className="md:col-span-3 space-y-6">
+                  <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                    <div className="flex justify-between items-start pb-4 border-b border-border mb-4">
+                      <div>
+                        <h3 className="font-bold text-lg text-foreground flex items-center gap-2">
+                          {proj ? proj.name : 'Unknown Project'} &raquo; Build #{dep.id.substring(0, 8)}
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1 font-mono">
+                          Started: {new Date(dep.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className={`pill ${getStatusPillClass(dep.status)}`}>{dep.status}</span>
+                    </div>
+
+                    {/* Metadata fields */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mb-6 bg-muted/50 p-4 border border-border rounded-lg">
+                      <div>
+                        <div className="text-muted-foreground">Triggered By</div>
+                        <div className="font-semibold text-foreground">{dep.triggered_by}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Commit SHA</div>
+                        <div className="font-semibold text-foreground font-mono">{dep.commit_sha.substring(0, 7)}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Duration</div>
+                        <div className="font-semibold text-foreground">{formatDuration(dep.duration_ms)}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Target Branch</div>
+                        <div className="font-semibold text-foreground font-mono">{proj?.branch || 'main'}</div>
+                      </div>
+                    </div>
+
+                    {/* Console Terminal */}
+                    <div className="flex flex-col h-[400px]">
+                      <div className="flex justify-between items-center mb-2 px-1">
+                        <span className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+                          <Terminal className="w-3.5 h-3.5" /> Console Output Log
+                        </span>
+                        <span className={getStatusBannerClass(terminalStatus)}>
+                          {terminalStatus.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="terminal-console rounded-lg flex-1 p-4 overflow-y-auto text-[11px] font-mono whitespace-pre-wrap relative bg-zinc-950 text-zinc-200 border border-zinc-800">
+                        {terminalLogs.length === 0 ? (
+                          <div className="absolute inset-0 flex flex-col justify-center items-center text-zinc-400 p-4 text-center">
+                            <Monitor className="w-8 h-8 mb-2" />
+                            <p className="text-sm">Loading logs...</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {terminalLogs.map((line, idx) => (
+                              <div key={idx} className={getLogLineClass(line)}>{line}</div>
+                            ))}
+                            <div ref={logEndRef} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Tab content: Dashboard (Jobs Table) */}
+          {currentTab === 'dashboard' && !selectedDeploymentId && (
+            <div className="space-y-6">
+              {/* Welcome Banner */}
+              <div className="bg-card border border-border rounded-xl p-6 shadow-sm relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="space-y-1 z-10">
+                  <h2 className="text-lg font-bold text-foreground">Welcome to Jenkins Presto CI/CD!</h2>
+                  <p className="text-xs text-muted-foreground max-w-xl">
+                    This deployment controller monitors repository commits, triggers automatic container builds, and routes traffic on custom domains.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 cursor-pointer z-10 shrink-0 border border-blue-500 shadow-sm"
+                >
+                  <Plus className="w-4 h-4" /> Create New Item
+                </button>
+              </div>
+
+              {/* Jobs Table */}
+              <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+                <div className="flex justify-between items-center mb-4 pb-2 border-b border-border">
+                  <h3 className="font-semibold text-base flex items-center gap-2 text-foreground">
+                    <Folder className="w-4 h-4 text-blue-500" /> Jobs List
+                  </h3>
+                  <span className="text-xs bg-muted text-muted-foreground px-2.5 py-0.5 rounded-full font-medium">
+                    {projects.length} jobs
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                        <th className="pb-3 pl-3 w-10 text-center">S</th>
+                        <th className="pb-3 w-10 text-center">W</th>
+                        <th className="pb-3">Job Name</th>
+                        <th className="pb-3">Last Success</th>
+                        <th className="pb-3">Last Failure</th>
+                        <th className="pb-3">Last Duration</th>
+                        <th className="pb-3 text-center w-20">Build</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {projects.length === 0 ? (
+                        <tr className="text-muted-foreground text-center">
+                          <td colSpan={7} className="py-12 text-sm">
+                            No jobs configured yet. Create a new item to get started!
+                          </td>
+                        </tr>
+                      ) : (
+                        projects.map(p => {
+                          const status = getProjectStatus(p.id);
+                          const weather = getProjectWeather(p.id);
+                          const projDeps = getProjectDeployments(p.id);
+
+                          const successes = projDeps
+                            .filter(d => d.status === 'live')
+                            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                          const failures = projDeps
+                            .filter(d => d.status.endsWith('_failed'))
+                            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                          const completed = projDeps
+                            .filter(d => !['queued', 'cloning', 'detecting', 'building', 'starting', 'health_checking', 'updating_routing'].includes(d.status))
+                            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+                          const lastSuccess = successes[0] ? getRelativeTime(successes[0].created_at) : 'N/A';
+                          const lastFailure = failures[0] ? getRelativeTime(failures[0].created_at) : 'N/A';
+                          const lastDuration = completed[0] ? formatDuration(completed[0].duration_ms) : 'N/A';
+
+                          return (
+                            <tr
+                              key={p.id}
+                              className="hover:bg-muted/50 text-sm text-foreground"
+                            >
+                              <td className="py-4 pl-3 text-center">
+                                <div className="flex justify-center">
+                                  {status === 'success' && (
+                                    <span
+                                      className="w-3.5 h-3.5 rounded-full bg-blue-500 dark:bg-blue-600 block shadow-[0_0_6px_rgba(59,130,246,0.6)]"
+                                      title="Stable (Success)"
+                                    ></span>
+                                  )}
+                                  {status === 'failed' && (
+                                    <span
+                                      className="w-3.5 h-3.5 rounded-full bg-red-500 block shadow-[0_0_6px_rgba(239,68,68,0.6)] animate-pulse"
+                                      title="Failed"
+                                    ></span>
+                                  )}
+                                  {status === 'building' && (
+                                    <span
+                                      className="w-3.5 h-3.5 rounded-full bg-amber-400 block shadow-[0_0_6px_rgba(245,158,11,0.6)] animate-pulse"
+                                      title="Building"
+                                    ></span>
+                                  )}
+                                  {status === 'idle' && (
+                                    <span
+                                      className="w-3.5 h-3.5 rounded-full bg-zinc-400 block"
+                                      title="No builds executed"
+                                    ></span>
+                                  )}
+                                </div>
+                              </td>
+                              
+                              <td className="py-4 text-center">
+                                <div className="flex justify-center" title={weather.desc}>
+                                  {weather.icon}
+                                </div>
+                              </td>
+                              
+                              <td className="py-4 font-medium">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-foreground text-sm flex items-center gap-1.5">
+                                    {p.name}
+                                    <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-normal font-mono">
+                                      {p.framework === 'REACT' && 'React'}
+                                      {p.framework === 'LARAVEL' && 'Laravel'}
+                                      {p.framework === 'NEXTJS' && 'Next.js'}
+                                      {p.framework === 'LARAVEL_INERTIA' && 'Inertia'}
+                                      {(!p.framework || p.framework === 'AUTO') && 'Auto'}
+                                    </span>
+                                  </span>
+                                  <span className="text-xs font-mono text-muted-foreground mt-0.5">
+                                    {p.repo_full_name} ({p.branch})
+                                  </span>
+                                  {p.domain && (
+                                    <span className="text-[10px] text-muted-foreground font-mono mt-0.5 block truncate max-w-[200px]" title={`${p.domain}:${p.port || 'Auto'}`}>
+                                      Target: {p.domain}{p.port ? `:${p.port}` : ''}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td className="py-4 text-xs font-medium text-muted-foreground">
+                                {successes[0] ? (
+                                  <button
+                                    onClick={() => setSelectedDeploymentId(successes[0].id)}
+                                    className="text-blue-500 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    {lastSuccess}
+                                  </button>
+                                ) : (
+                                  <span>N/A</span>
+                                )}
+                              </td>
+
+                              <td className="py-4 text-xs font-medium text-muted-foreground">
+                                {failures[0] ? (
+                                  <button
+                                    onClick={() => setSelectedDeploymentId(failures[0].id)}
+                                    className="text-red-500 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    {lastFailure}
+                                  </button>
+                                ) : (
+                                  <span>N/A</span>
+                                )}
+                              </td>
+
+                              <td className="py-4 text-xs text-muted-foreground">{lastDuration}</td>
+
+                              <td className="py-4 text-center">
+                                <div className="flex justify-center">
+                                  <button
+                                    onClick={() => triggerManualDeploy(p.id)}
+                                    className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer border border-emerald-400 shadow-sm"
+                                    title="Build Now"
+                                  >
+                                    <Play className="w-3.5 h-3.5 fill-current" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab content: Build History */}
+          {currentTab === 'build-history' && !selectedDeploymentId && (
+            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
               <div className="flex justify-between items-center mb-4 pb-2 border-b border-border">
                 <h3 className="font-semibold text-base flex items-center gap-2 text-foreground">
-                  <ListFilter className="w-4 h-4 text-muted-foreground" /> Recent Deployments
+                  <History className="w-4 h-4 text-amber-500" /> Build History
                 </h3>
                 <span className="text-xs bg-muted text-muted-foreground px-2.5 py-0.5 rounded-full font-medium">
-                  {deployments.length} total
+                  {deployments.length} total builds
                 </span>
               </div>
-              
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      <th className="pb-3 pl-3">Commit</th>
+                      <th className="pb-3 pl-3">Build</th>
                       <th className="pb-3">Project</th>
-                      <th className="pb-3">State</th>
+                      <th className="pb-3">Commit</th>
+                      <th className="pb-3">Status</th>
                       <th className="pb-3">Duration</th>
-                      <th className="pb-3">Created</th>
-                      <th className="pb-3">Action</th>
+                      <th className="pb-3">Completed</th>
+                      <th className="pb-3 text-right pr-3">Console</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {deployments.length === 0 ? (
                       <tr className="text-muted-foreground text-center">
-                        <td colSpan={6} className="py-12 text-sm">
-                          No deployments found. Trigger a webhook or create a project!
+                        <td colSpan={7} className="py-12 text-sm">
+                          No build runs found.
                         </td>
                       </tr>
                     ) : (
@@ -478,37 +908,37 @@ export default function App() {
                           <tr
                             key={d.id}
                             onClick={() => setSelectedDeploymentId(d.id)}
-                            className={`cursor-pointer text-sm text-foreground ${
-                              selectedDeploymentId === d.id ? 'bg-muted hover:bg-muted' : 'hover:bg-muted'
-                            }`}
+                            className="cursor-pointer text-sm text-foreground hover:bg-muted/50"
                           >
-                            <td className="py-3.5 pl-3">
-                              <span className="font-mono bg-muted border border-border px-1.5 py-0.5 rounded text-[11px]">
-                                {d.commit_sha.substring(0, 7)}
-                              </span>
+                            <td className="py-3.5 pl-3 font-semibold text-blue-500">
+                              #{d.id.substring(0, 8)}
                             </td>
                             <td className="py-3.5 font-medium text-foreground">{proj ? proj.name : 'Unknown'}</td>
+                            <td className="py-3.5 text-xs font-mono max-w-[150px] truncate" title={d.commit_message}>
+                              <span className="bg-muted border border-border px-1.5 py-0.5 rounded text-[11px]">
+                                {d.commit_sha.substring(0, 7)}
+                              </span>
+                              <span className="ml-2 text-muted-foreground truncate">{d.commit_message}</span>
+                            </td>
                             <td className="py-3.5">
                               <span className={`pill ${getStatusPillClass(d.status)}`}>{d.status}</span>
                             </td>
                             <td className="py-3.5 text-xs text-muted-foreground">
-                              {d.duration_ms ? `${(d.duration_ms / 1000).toFixed(1)}s` : '--'}
+                              {formatDuration(d.duration_ms)}
                             </td>
                             <td className="py-3.5 text-xs text-muted-foreground">
-                              {new Date(d.created_at).toLocaleTimeString()} ({new Date(d.created_at).toLocaleDateString()})
+                              {d.completed_at ? getRelativeTime(d.completed_at) : getRelativeTime(d.created_at)}
                             </td>
-                            <td className="py-3.5">
-                              {d.live_url ? (
-                                <a
-                                  href={d.live_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="bg-secondary text-secondary-foreground hover:bg-secondary px-2.5 py-1 border border-border rounded-md text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
-                                >
-                                  Open <ExternalLink className="w-3 h-3" />
-                                </a>
-                              ) : '--'}
+                            <td className="py-3.5 text-right pr-3">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedDeploymentId(d.id);
+                                }}
+                                className="bg-secondary text-secondary-foreground hover:bg-secondary px-2.5 py-1 border border-border rounded-md text-[11px] font-medium inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Terminal className="w-3 h-3 text-blue-500" /> Console
+                              </button>
                             </td>
                           </tr>
                         );
@@ -518,106 +948,101 @@ export default function App() {
                 </table>
               </div>
             </div>
+          )}
 
-            {/* Live Terminal logs */}
-            <div className="xl:col-span-5 bg-card border border-border rounded-xl p-6 shadow-sm flex flex-col h-[520px]">
-              <div className="mb-4 pb-2 border-b border-border">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-semibold text-base flex items-center gap-2 text-foreground">
-                    <Terminal className="w-4 h-4 text-muted-foreground" /> Live Log Console
-                  </h3>
-                  <span className={getStatusBannerClass(terminalStatus)}>
-                    {terminalStatus.toUpperCase()}
-                  </span>
+          {/* Tab content: System Status (Manage Jenkins) */}
+          {currentTab === 'system-status' && !selectedDeploymentId && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">CPU Resource</span>
+                    <Cpu className="w-5 h-5 text-blue-500" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-2xl font-bold text-foreground">{(stats.cpuLoad * 100).toFixed(1)}%</div>
+                    <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                      <div className="bg-blue-500 h-full rounded-full" style={{ width: `${stats.cpuLoad * 100}%` }}></div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground italic">Host machine processor capacity in use.</p>
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground mt-1 truncate">{terminalMeta}</div>
+
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Memory Allocation</span>
+                    <HardDrive className="w-5 h-5 text-emerald-500" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-2xl font-bold text-foreground">{stats.freeMem} / {stats.totalMem}</div>
+                    <p className="text-xs text-muted-foreground">Free physical memory available.</p>
+                    <p className="text-[10px] text-muted-foreground italic">Virtual & container memory are handled dynamically.</p>
+                  </div>
+                </div>
+
+                <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Automation Engine</span>
+                    <Activity className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between border-b border-border pb-1">
+                      <span className="text-muted-foreground">Running Builds</span>
+                      <span className="font-semibold text-foreground">{stats.queueActive}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Queued Builds</span>
+                      <span className="font-semibold text-foreground">{stats.queueWaiting}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
-              
-              <div className="terminal-console rounded-lg flex-1 p-4 overflow-y-auto text-xs whitespace-pre-wrap relative">
-                {terminalLogs.length === 0 ? (
-                  <div className="absolute inset-0 flex flex-col justify-center items-center text-muted-foreground p-4 text-center">
-                    <Monitor className="w-8 h-8 mb-2" />
-                    <p className="text-sm">Logs will stream here in real-time once a deployment starts.</p>
+
+              <div className="bg-card border border-border rounded-xl p-6 shadow-sm space-y-4">
+                <h3 className="font-semibold text-base text-foreground pb-2 border-b border-border">
+                  Manage Jenkins &rsaquo; System Configuration
+                </h3>
+                
+                <div className="space-y-4 text-sm max-w-2xl">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-muted-foreground block">Webhook Endpoint URL</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.protocol}//${window.location.host}/api/webhooks/github`}
+                        className="flex-1 bg-muted border border-input rounded-lg px-3 py-2 text-xs font-mono text-muted-foreground focus:outline-none"
+                      />
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.protocol}//${window.location.host}/api/webhooks/github`);
+                          alert('Webhook URL copied!');
+                        }}
+                        className="bg-secondary text-secondary-foreground border border-border hover:bg-secondary px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer"
+                      >
+                        Copy URL
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Configure this URL in your GitHub repository webhooks settings (Content type: application/json).</p>
                   </div>
-                ) : (
-                  <div className="space-y-0.5">
-                    {terminalLogs.map((line, idx) => (
-                      <div key={idx} className={getLogLineClass(line)}>{line}</div>
-                    ))}
-                    <div ref={logEndRef} />
+
+                  <div className="space-y-1 pt-2">
+                    <label className="text-xs font-semibold text-muted-foreground block">Webhook Secret Signature</label>
+                    <input
+                      type="password"
+                      readOnly
+                      value="••••••••••••••••••••••••••••••••"
+                      className="w-full bg-muted border border-input rounded-lg px-3 py-2 text-xs font-mono text-muted-foreground focus:outline-none"
+                    />
+                    <p className="text-[11px] text-muted-foreground">Secret signature configuration used to verify GitHub payload signatures.</p>
                   </div>
-                )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Tab content: Projects */}
-        {currentTab === 'projects' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.length === 0 ? (
-              <div className="bg-card border border-border rounded-xl p-8 text-center col-span-full">
-                <Folder className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-60" />
-                <h3 className="font-medium text-foreground">No projects registered</h3>
-                <p className="text-xs text-muted-foreground mt-1">Configure your first application repository to start deploying.</p>
-              </div>
-            ) : (
-              projects.map(p => (
-                <div key={p.id} className="bg-card border border-border rounded-xl p-5 flex flex-col justify-between h-[255px] shadow-sm">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-semibold text-sm text-foreground">{p.name}</h3>
-                      <span className="text-xs text-muted-foreground font-mono block mt-0.5 truncate max-w-[170px]" title={p.repo_full_name}>
-                        {p.repo_full_name}
-                      </span>
-                    </div>
-                    <span className="text-[10px] bg-muted border border-border text-muted-foreground px-2 py-0.5 rounded font-medium inline-flex items-center gap-1">
-                      {p.is_private ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
-                      {p.is_private ? 'Private' : 'Public'}
-                    </span>
-                  </div>
-                  <div className="space-y-1.5 my-3 text-xs">
-                    <div className="flex justify-between border-b border-border pb-1">
-                      <span className="text-muted-foreground">Branch</span>
-                      <span className="text-foreground font-medium">{p.branch}</span>
-                    </div>
-                    <div className="flex justify-between border-b border-border pb-1">
-                      <span className="text-muted-foreground">Framework</span>
-                      <span className="text-foreground font-medium">
-                        {p.framework === 'REACT' && 'React SPA'}
-                        {p.framework === 'LARAVEL' && 'Pure Laravel'}
-                        {p.framework === 'NEXTJS' && 'Next.js'}
-                        {p.framework === 'LARAVEL_INERTIA' && 'Laravel Inertia'}
-                        {(!p.framework || p.framework === 'AUTO') && 'Auto Detect'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between border-b border-border pb-1">
-                      <span className="text-muted-foreground">Domain / Port</span>
-                      <span className="text-foreground font-medium truncate max-w-[150px]" title={p.domain ? `${p.domain}:${p.port || 'Auto'}` : undefined}>
-                        {p.domain ? `${p.domain}${p.port ? `:${p.port}` : ''}` : `Dynamic Port`}
-                      </span>
-                    </div>
-                    <div className="flex justify-between border-b border-border pb-1">
-                      <span className="text-muted-foreground">Created</span>
-                      <span className="text-foreground font-medium">{new Date(p.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => triggerManualDeploy(p.id)}
-                      className="bg-secondary text-secondary-foreground hover:bg-secondary flex-1 justify-center py-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer border border-border"
-                    >
-                      <Play className="w-3 h-3" /> Deploy Now
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-
-      </main>
+        </main>
+      </div>
 
       {/* Create Project Modal */}
       {isModalOpen && (
@@ -625,14 +1050,14 @@ export default function App() {
           <div className="modal bg-card border border-border rounded-xl max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-xl">
             <div className="modal-header flex justify-between items-center px-6 py-4 border-b border-border">
               <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
-                <FolderPlus className="w-4 h-4 text-muted-foreground" /> Create New Project
+                <FolderPlus className="w-4 h-4 text-muted-foreground" /> Create New Item
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="modal-close text-muted-foreground hover:text-foreground cursor-pointer text-xl">&times;</button>
             </div>
             
             <form onSubmit={handleCreateProject} className="p-6 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Project Name</label>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Item Name</label>
                 <input
                   type="text"
                   value={newProject.name}
@@ -776,7 +1201,7 @@ export default function App() {
                   type="submit"
                   className="bg-primary text-primary-foreground hover:bg-primary px-4 py-2 rounded-lg text-sm font-medium cursor-pointer"
                 >
-                  Create Project
+                  Create Item
                 </button>
               </div>
             </form>
