@@ -341,15 +341,11 @@ configure_env() {
   fi
 
   IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
-  NGINX_PORT=${NGINX_PORT:-"80"}
+  NGINX_PORT="80"
   CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-""}
   COMPOSE_PROFILES=${COMPOSE_PROFILES:-""}
 
   echo -e "${CYAN}Please input configuration values (Press [Enter] to use defaults):${NC}\n"
-
-  # Custom Nginx Port Setup
-  read -rp "Enter Nginx Host Port [Default: $NGINX_PORT]: " input_port
-  NGINX_PORT=${input_port:-$NGINX_PORT}
 
   # Cloudflare Tunnel Exposure
   local is_tunnel_default="N"
@@ -461,7 +457,6 @@ deploy_docker() {
 
 print_summary() {
   IP_ADDR=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "your-server-ip")
-  NGINX_PORT=$(grep -E "^NGINX_PORT=" .env | cut -d'=' -f2- || echo "80")
   WEBHOOK_SECRET=$(grep -E "^WEBHOOK_SECRET=" .env | cut -d'=' -f2-)
   ENCRYPTION_KEY=$(grep -E "^ENCRYPTION_KEY=" .env | cut -d'=' -f2-)
   COMPOSE_PROFILES=$(grep -E "^COMPOSE_PROFILES=" .env | cut -d'=' -f2-)
@@ -470,13 +465,8 @@ print_summary() {
   
   echo -e "${GREEN}${BOLD}Congratulations! PRESTO has been successfully started via Docker.${NC}"
   echo -e "\n${BOLD}----------------- SYSTEM ENDPOINTS -----------------${NC}"
-  if [ "$NGINX_PORT" = "80" ]; then
-    echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}${NC}"
-    echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}/webhook/github${NC}"
-  else
-    echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}:${NGINX_PORT}${NC}"
-    echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}:${NGINX_PORT}/webhook/github${NC}"
-  fi
+  echo -e "  Dashboard URL:       ${CYAN}${BOLD}http://${IP_ADDR}${NC}"
+  echo -e "  Webhook URL:         ${CYAN}${BOLD}http://${IP_ADDR}/webhook/github${NC}"
   
   if [ "$COMPOSE_PROFILES" = "tunnel" ]; then
     echo -e "\n${BOLD}----------------- CLOUDFLARE TUNNEL INFO -----------------${NC}"
@@ -484,7 +474,7 @@ print_summary() {
     echo -e "  In your Cloudflare Zero Trust Dashboard, route your public hostname to:"
     echo -e "  - Service Type:      ${CYAN}HTTP${NC}"
     echo -e "  - Service URL/Port:  ${GREEN}${BOLD}http://presto-nginx:80${NC} (if using built-in tunnel container)"
-    echo -e "                       or ${GREEN}${BOLD}http://localhost:${NGINX_PORT}${NC} (if using host tunnel)"
+    echo -e "                       or ${GREEN}${BOLD}http://localhost:80${NC} (if using host tunnel)"
   fi
   
   echo -e "\n${BOLD}----------------- SECURITY KEYS -----------------${NC}"
