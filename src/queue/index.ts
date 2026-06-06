@@ -1,23 +1,8 @@
 import { IQueue } from './queue.interface';
-import { MemoryQueue } from './memory.queue';
-import { config } from '../config';
+import { BullQueue } from './bull.queue';
 
-let queue: IQueue;
-
-if (config.SIMULATION_MODE) {
-  console.log('[Queue] Running in SIMULATION_MODE. Using MemoryQueue.');
-  queue = new MemoryQueue();
-} else {
-  try {
-    const { BullQueue } = require('./bull.queue');
-    queue = new BullQueue();
-    console.log('[Queue] Loaded BullQueue.');
-  } catch (error) {
-    console.warn('[Queue] Failed to load BullQueue, falling back to MemoryQueue:', error);
-    queue = new MemoryQueue();
-  }
-}
+console.log('[Queue] Loaded BullQueue.');
+const queue: IQueue = new BullQueue();
 
 export { queue };
 export * from './queue.interface';
-export * from './memory.queue';

@@ -39,7 +39,7 @@ const db_1 = require("../db");
 const git_1 = require("../services/git");
 const detector_1 = require("../services/detector");
 const docker_1 = require("../services/docker");
-const caddy_1 = require("../services/caddy");
+const nginx_1 = require("../services/nginx");
 const crypto_1 = require("../services/crypto");
 const notifier_1 = require("../services/notifier");
 const config_1 = require("../config");
@@ -110,12 +110,10 @@ function startWorker() {
             // --- Phase 6: Dynamic Routing Configuration ---
             currentPhase = 'updating_routing';
             db_1.db.updateDeploymentStatus(deployment_id, 'updating_routing');
-            await caddy_1.caddyService.upsertRoute(project_id, deployment_id, domain, allocatedPort);
+            await nginx_1.nginxService.upsertRoute(project_id, deployment_id, domain, allocatedPort);
             // --- Phase 7: Live & Cleanup ---
             currentPhase = 'live';
-            const liveUrl = config_1.config.SIMULATION_MODE
-                ? `http://localhost:${allocatedPort}`
-                : `https://${domain}`;
+            const liveUrl = `http://${domain}`;
             // Update deployment record to LIVE
             const deployment = db_1.db.getDeployment(deployment_id);
             if (deployment) {
@@ -156,13 +154,8 @@ function startWorker() {
             if (newContainerStarted) {
                 db_1.db.appendDeploymentLog(deployment_id, `ROLLBACK: Stopping failed container paas_${deployment_id}...`);
                 try {
-                    if (config_1.config.SIMULATION_MODE) {
-                        await docker_1.dockerService.stopAndRemoveOldContainers(project_id, '');
-                    }
-                    else {
-                        (0, child_process_1.execSync)(`docker stop paas_${deployment_id}`);
-                        (0, child_process_1.execSync)(`docker rm paas_${deployment_id}`);
-                    }
+                    (0, child_process_1.execSync)(`docker stop paas_${deployment_id}`);
+                    (0, child_process_1.execSync)(`docker rm paas_${deployment_id}`);
                     db_1.db.appendDeploymentLog(deployment_id, `ROLLBACK: Failed container cleaned up.`);
                 }
                 catch (cleanErr) {

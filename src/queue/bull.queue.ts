@@ -1,33 +1,26 @@
 import { IQueue, Job, QueueOptions } from './queue.interface';
 import { config } from '../config';
+import { Queue, Worker } from 'bullmq';
 
 export class BullQueue<T = any> implements IQueue<T> {
-  private queue: any;
+  private queue: Queue;
   private worker: any;
 
   constructor() {
-    try {
-      // Lazy load to prevent crash if bullmq is not installed/required
-      const { Queue } = require('bullmq');
-      
-      const connection = {
-        host: config.REDIS.host,
-        port: config.REDIS.port
-      };
+    const connection = {
+      host: config.REDIS.host,
+      port: config.REDIS.port
+    };
 
-      this.queue = new Queue('build-queue', {
-        connection,
-        defaultJobOptions: {
-          removeOnComplete: { age: 86400, count: 100 },
-          removeOnFail: { age: 604800 }
-        }
-      });
+    this.queue = new Queue('build-queue', {
+      connection,
+      defaultJobOptions: {
+        removeOnComplete: { age: 86400, count: 100 },
+        removeOnFail: { age: 604800 }
+      }
+    });
 
-      console.log(`BullMQ initialized connected to Redis at ${config.REDIS.host}:${config.REDIS.port}`);
-    } catch (error) {
-      console.error('Failed to initialize BullMQ. Ensure bullmq npm package is installed and Redis is running:', error);
-      throw error;
-    }
+    console.log(`BullMQ initialized connected to Redis at ${config.REDIS.host}:${config.REDIS.port}`);
   }
 
   async addJob(name: string, data: T, options?: QueueOptions): Promise<string> {
@@ -47,8 +40,6 @@ export class BullQueue<T = any> implements IQueue<T> {
   }
 
   processJobs(handler: (job: Job<T>) => Promise<void>, concurrency = 1): void {
-    const { Worker } = require('bullmq');
-    
     const connection = {
       host: config.REDIS.host,
       port: config.REDIS.port

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  presto-redis:
+    image: redis:alpine
+    container_name: presto-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  presto-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: presto-app
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - REDIS_HOST=presto-redis
+      - REDIS_PORT=6379
+      - NGINX_CONF_DIR=/app/nginx/conf.d
+      - NGINX_UPSTREAM_HOST=host.docker.internal
+      - NGINX_RELOAD_CMD=docker exec presto-nginx nginx -s reload
+      # Ensure you change these in production
+      - WEBHOOK_SECRET=github_webhook_secret_key_here
+      - ENCRYPTION_KEY=my_secure_32_char_encryption_key_
+    volumes:
+      # Mount host docker socket to manage containers on host
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist DB files
+      - ./data:/app/data
+      # Persist builds and logs
+      - ./builds:/app/builds
+      # Shared nginx configuration folder
+      - ./nginx/conf.d:/app/nginx/conf.d
+    depends_on:
+      - presto-redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  presto-nginx:
+    image: nginx:alpine
+    container_name: presto-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      # Mount shared configurations folder
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - presto-app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  redis_data:

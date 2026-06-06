@@ -1,132 +1,69 @@
-# PaaS Deployment Engine
+# PRESTO - PaaS Deployment Engine
 
-A lightweight, developer-oriented Platform as a Service (PaaS) deployment engine. It automates the software delivery pipeline from GitHub Webhook reception to live container orchestration and dynamic reverse proxy routing.
+A lightweight, developer-oriented Platform as a Service (PaaS) deployment engine. It automates the software delivery pipeline from GitHub Webhook reception to live container orchestration and dynamic Nginx reverse proxy routing.
 
-The engine includes a built-in clean architecture adapter layer that runs in either **Simulation Mode** (zero-dependency local testing) or **Production Mode** (real Docker, Redis, and Caddy integration).
+This engine is designed to be fully containerized using **Docker Compose** and **Nginx** for a production-ready server environment.
 
 ---
 
 ## Features
 
 - **GitHub Webhook Validation**: Implements raw-body HMAC-SHA256 signature verification and delivery idempotency caching.
-- **Queue Pipeline**: Asynchronous build queue with memory-based and BullMQ (Redis) adapters.
+- **Queue Pipeline**: Asynchronous build queue backed by BullMQ and Redis.
 - **Framework Detection**: Scans workspace patterns to identify Laravel (PHP), React (Vite/SPA), and Next.js (SSR) projects.
-- **Dynamic Docker builds**: Generates optimal multi-stage Dockerfiles and executes builds with memory/CPU resource bounds.
-- **Caddy Reverse Proxy Routing**: Upserts upstream routings on the fly using Caddy Admin API.
-- **Minimalist Developer Dashboard**: Built with Tailwind CSS v4 and Lucide SVG icons. Features light/dark theme toggles, system resource telemetry, and real-time ANSI terminal log streaming.
-- **Webhook Simulator**: Integrated webhook payload simulator to test the build orchestration locally.
+- **Dynamic Docker Builds**: Generates optimal multi-stage Dockerfiles and executes builds with memory/CPU resource bounds.
+- **Nginx Reverse Proxy Routing**: Upserts upstream routings on the fly using dynamically written Nginx configurations and hot-reload.
+- **Minimalist Developer Dashboard**: Built with Tailwind CSS and Lucide SVG icons. Features light/dark theme toggles, system resource telemetry, and real-time ANSI terminal log streaming.
 
 ---
 
 ## Getting Started
 
-### Method A: Automated Installation (Recommended for Servers)
+The recommended way to run PRESTO in production is using Docker Compose.
 
-We provide an interactive **Server Setup Wizard** that automates the installation of all system prerequisites, environment configurations, and PM2 deployment.
+### System Prerequisites
 
-Run the following command on your Ubuntu/Debian server:
+Make sure your server has the following installed:
+1. **Docker**: `sudo apt install -y docker.io`
+2. **Docker Compose**: `sudo apt install -y docker-compose`
 
-```bash
-chmod +x setup.sh
-./setup.sh
-```
+### Installation Steps
 
-The setup wizard will:
-1. Verify system compatibility and sudo privileges.
-2. Install **Node.js LTS (v20)**, **Git**, **Redis Server**, **Docker Engine**, **Caddy Server**, **PM2** globally, and **Cloudflare Tunnel (`cloudflared`)**.
-3. Guide you through configuring `.env` variables (e.g. ports, Redis settings) with automatic generation of secure, random cryptographic keys (`WEBHOOK_SECRET` and `ENCRYPTION_KEY`).
-4. Provide exposure and routing configurations:
-   - **Direct Port Access**: Exposure via server IP on a dedicated port.
-   - **Caddy Reverse Proxy**: Automatic SSL certificate generation and domain routing (e.g., `https://presto.yourdomain.com`).
-   - **Cloudflare Tunnel (`cloudflared`)**: Direct, secure tunneling through Cloudflare using a Tunnel Token, avoiding open firewall ports.
-5. Install npm dependencies and compile the frontend and backend.
-6. Launch the application in the background via **PM2** and save the process state.
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/Perdafos/PRESTO.git
+   cd PRESTO
+   ```
+
+2. **Configure Environment Variables**:
+   Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+   Generate secure secrets and configure `.env`:
+   - `WEBHOOK_SECRET`: Secure GitHub Webhook secret.
+   - `ENCRYPTION_KEY`: A 32-character encryption key for the database credentials.
+
+3. **Deploy using Docker Compose**:
+   ```bash
+   docker-compose up -d --build
+   ```
+
+PRESTO will launch three services:
+- `presto-app`: The Node/Hono engine running on port `3000` (internal).
+- `presto-redis`: BullMQ's queue broker running on port `6379` (internal).
+- `presto-nginx`: The Nginx reverse proxy exposed on port `80` (external).
 
 ---
 
-### Method B: Manual Installation (For Local Sandbox & Testing)
+## Architecture & How It Works
 
-If you prefer to install packages manually or are running in local sandboxing mode:
-
-#### 1. Installation
-Clone the repository and install dependencies:
-```bash
-git clone https://github.com/Perdafos/PRESTO.git
-cd PRESTO
-npm install
-```
-
-#### 2. Environment Configuration
-Copy the example environment file:
-```bash
-cp .env.example .env
-```
-
-Configure the environment variables inside `.env`:
-```env
-PORT=3000
-WEBHOOK_SECRET=your_github_webhook_secret
-ENCRYPTION_KEY=your_32_character_encryption_key
-SIMULATION_MODE=true # Set to false for real Docker/Caddy deployment
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-```
-
----
-
-## Modes of Operation
-
-### Mode 1: Simulation Mode (`SIMULATION_MODE=true`)
-Designed for local sandboxing, developer testing, and demo presentations. It runs immediately on any OS (including Windows, macOS, and Linux) without requiring external services.
-
-- **Queue**: Uses an in-memory event-driven queue mirroring BullMQ.
-- **Git & Build**: Simulates checkout speeds and writes framework-accurate workspace templates.
-- **Docker**: Runs lightweight background HTTP servers to simulate active containers passing health checks.
-- **Caddy**: Logs dynamic routing registrations in memory.
-
-To run:
-```bash
-npm run dev
-```
-Open your browser at `http://localhost:3000`.
-
-### Mode 2: Production Mode (`SIMULATION_MODE=false`)
-Designed for live deployments on Ubuntu Server. It executes real commands, builds real Docker images, and updates your proxy configuration.
-
-#### System Prerequisites (Ubuntu Server)
-If not using the automated `setup.sh` script, install these packages manually:
-1. **Git**: `sudo apt install -y git`
-2. **Redis**: `sudo apt install -y redis-server`
-3. **Docker Engine**:
-   ```bash
-   sudo apt install -y docker.io
-   sudo usermod -aG docker $USER
-   newgrp docker
-   docker network create paas_network
-   ```
-4. **Caddy Server** (Admin API enabled on `localhost:2019`):
-   ```bash
-   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-   sudo apt update
-   sudo apt install -y caddy
-   ```
-
-#### Run Production Server
-Compile the Tailwind CSS styles and build the TypeScript application:
-```bash
-npm run build
-npm start
-```
-
-For production process management, it is recommended to run the app using PM2:
-```bash
-sudo npm install -g pm2
-pm2 start dist/index.js --name paas-engine
-pm2 startup
-pm2 save
-```
+1. **GitHub Webhook Reception**: The engine listens at `http://<your-domain>/webhook/github`. When a push is received, it verifies the signature, creates a deployment record, and pushes a build job onto the BullMQ Redis queue.
+2. **Workspace Setup & Cloning**: The worker pops the build job, clones the branch from Git using isolated environments, and runs the detection scanner.
+3. **Framework Scanner**: Scans project structure to auto-detect React (SPA), Next.js (SSR), or Laravel (PHP) and writes an optimized Dockerfile.
+4. **Docker Image Build**: Builds a production Docker image labeled with metadata (`paas.project_id`, `paas.deployment_id`).
+5. **Container Orchestration**: Spins up a container on the host Docker daemon, allocates a dynamic port, and injects decrypted environment variables.
+6. **Nginx Dynamic Routing**: The engine writes a proxy server block under `./nginx/conf.d/project_<project_id>.conf` pointing `http://<project-domain>` to `http://host.docker.internal:<allocated_port>`, and runs `docker exec presto-nginx nginx -s reload` to hot-reload routing rules with zero downtime.
 
 ---
 
@@ -135,4 +72,3 @@ pm2 save
 This software and technology are copyrighted property. All rights reserved.
 
 Copyright (c) 2026 Perdafos.
-

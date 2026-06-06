@@ -2,30 +2,23 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BullQueue = void 0;
 const config_1 = require("../config");
+const bullmq_1 = require("bullmq");
 class BullQueue {
     queue;
     worker;
     constructor() {
-        try {
-            // Lazy load to prevent crash if bullmq is not installed/required
-            const { Queue } = require('bullmq');
-            const connection = {
-                host: config_1.config.REDIS.host,
-                port: config_1.config.REDIS.port
-            };
-            this.queue = new Queue('build-queue', {
-                connection,
-                defaultJobOptions: {
-                    removeOnComplete: { age: 86400, count: 100 },
-                    removeOnFail: { age: 604800 }
-                }
-            });
-            console.log(`BullMQ initialized connected to Redis at ${config_1.config.REDIS.host}:${config_1.config.REDIS.port}`);
-        }
-        catch (error) {
-            console.error('Failed to initialize BullMQ. Ensure bullmq npm package is installed and Redis is running:', error);
-            throw error;
-        }
+        const connection = {
+            host: config_1.config.REDIS.host,
+            port: config_1.config.REDIS.port
+        };
+        this.queue = new bullmq_1.Queue('build-queue', {
+            connection,
+            defaultJobOptions: {
+                removeOnComplete: { age: 86400, count: 100 },
+                removeOnFail: { age: 604800 }
+            }
+        });
+        console.log(`BullMQ initialized connected to Redis at ${config_1.config.REDIS.host}:${config_1.config.REDIS.port}`);
     }
     async addJob(name, data, options) {
         if (!this.queue)
@@ -42,12 +35,11 @@ class BullQueue {
         return job.id || '';
     }
     processJobs(handler, concurrency = 1) {
-        const { Worker } = require('bullmq');
         const connection = {
             host: config_1.config.REDIS.host,
             port: config_1.config.REDIS.port
         };
-        this.worker = new Worker('build-queue', async (bullJob) => {
+        this.worker = new bullmq_1.Worker('build-queue', async (bullJob) => {
             const job = {
                 id: bullJob.id || '',
                 name: bullJob.name,

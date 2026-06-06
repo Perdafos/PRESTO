@@ -4,7 +4,7 @@ import { db, DeploymentStatus } from '../db';
 import { gitService } from '../services/git';
 import { detectorService } from '../services/detector';
 import { dockerService } from '../services/docker';
-import { caddyService } from '../services/caddy';
+import { nginxService } from '../services/nginx';
 import { decrypt } from '../services/crypto';
 import { notificationService } from '../services/notifier';
 import { config } from '../config';
@@ -125,13 +125,11 @@ export function startWorker() {
       // --- Phase 6: Dynamic Routing Configuration ---
       currentPhase = 'updating_routing';
       db.updateDeploymentStatus(deployment_id, 'updating_routing');
-      await caddyService.upsertRoute(project_id, deployment_id, domain, allocatedPort);
+      await nginxService.upsertRoute(project_id, deployment_id, domain, allocatedPort);
 
       // --- Phase 7: Live & Cleanup ---
       currentPhase = 'live';
-      const liveUrl = config.SIMULATION_MODE 
-        ? `http://localhost:${allocatedPort}`
-        : `https://${domain}`;
+      const liveUrl = `http://${domain}`;
 
       // Update deployment record to LIVE
       const deployment = db.getDeployment(deployment_id);
@@ -180,12 +178,8 @@ export function startWorker() {
       if (newContainerStarted) {
         db.appendDeploymentLog(deployment_id, `ROLLBACK: Stopping failed container paas_${deployment_id}...`);
         try {
-          if (config.SIMULATION_MODE) {
-            await dockerService.stopAndRemoveOldContainers(project_id, '');
-          } else {
-            execSync(`docker stop paas_${deployment_id}`);
-            execSync(`docker rm paas_${deployment_id}`);
-          }
+          execSync(`docker stop paas_${deployment_id}`);
+          execSync(`docker rm paas_${deployment_id}`);
           db.appendDeploymentLog(deployment_id, `ROLLBACK: Failed container cleaned up.`);
         } catch (cleanErr: any) {
           db.appendDeploymentLog(deployment_id, `ROLLBACK WARNING: Failed to remove container: ${cleanErr.message}`);
