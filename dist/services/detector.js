@@ -46,6 +46,9 @@ class DetectorService {
         if (!fs.existsSync(sourceDir)) {
             throw new Error(`Source directory does not exist: ${sourceDir}`);
         }
+        const deployment = db_1.db.getDeployment(deploymentId);
+        const project = deployment ? db_1.db.getProject(deployment.project_id) : undefined;
+        const forcedFramework = project ? project.framework : undefined;
         const rootFiles = fs.readdirSync(sourceDir);
         db_1.db.appendDeploymentLog(deploymentId, `Root directory contents: ${rootFiles.join(', ')}`);
         let laravelScore = 0;
@@ -130,31 +133,43 @@ class DetectorService {
         // 2. Decision Logic
         let framework = 'REACT';
         let internalPort = 80; // React Nginx default
-        if (laravelScore >= 15) {
-            if (isInertia) {
-                framework = 'LARAVEL_INERTIA';
-                db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: Laravel with InertiaJS`);
+        if (forcedFramework && forcedFramework !== 'AUTO') {
+            framework = forcedFramework;
+            db_1.db.appendDeploymentLog(deploymentId, `Forcing framework selection to: ${framework} (from project configuration)`);
+            if (framework === 'NEXTJS') {
+                internalPort = 3000;
             }
             else {
-                framework = 'LARAVEL';
-                db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: Pure Laravel`);
+                internalPort = 80;
             }
-            internalPort = 80; // Laravel runs Nginx/FPM exposing port 80
-        }
-        else if (nextScore >= 15) {
-            framework = 'NEXTJS';
-            db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: Next.js (React SSR)`);
-            internalPort = 3000; // Next.js default start port
-        }
-        else if (reactScore >= 15) {
-            framework = 'REACT';
-            db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: React SPA`);
-            internalPort = 80; // React built static files run on Nginx port 80
         }
         else {
-            db_1.db.appendDeploymentLog(deploymentId, `No strong framework signals detected. Defaulting to React SPA.`);
-            framework = 'REACT';
-            internalPort = 80;
+            if (laravelScore >= 15) {
+                if (isInertia) {
+                    framework = 'LARAVEL_INERTIA';
+                    db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: Laravel with InertiaJS`);
+                }
+                else {
+                    framework = 'LARAVEL';
+                    db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: Pure Laravel`);
+                }
+                internalPort = 80; // Laravel runs Nginx/FPM exposing port 80
+            }
+            else if (nextScore >= 15) {
+                framework = 'NEXTJS';
+                db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: Next.js (React SSR)`);
+                internalPort = 3000; // Next.js default start port
+            }
+            else if (reactScore >= 15) {
+                framework = 'REACT';
+                db_1.db.appendDeploymentLog(deploymentId, `Detected Framework: React SPA`);
+                internalPort = 80; // React built static files run on Nginx port 80
+            }
+            else {
+                db_1.db.appendDeploymentLog(deploymentId, `No strong framework signals detected. Defaulting to React SPA.`);
+                framework = 'REACT';
+                internalPort = 80;
+            }
         }
         const result = {
             framework,
@@ -202,13 +217,16 @@ class DetectorService {
     }
     // --- Dockerfile Templates ---
     getReactDockerfile(nodeVer, buildCmd) {
+        const runCmd = (buildCmd.startsWith('npm') || buildCmd.startsWith('npx') || buildCmd.startsWith('yarn') || buildCmd.startsWith('pnpm'))
+            ? buildCmd
+            : 'npm run build';
         return `# Stage 1: Build React static files
 FROM node:${nodeVer}-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci || npm install
 COPY . .
-RUN ${buildCmd}
+RUN ${runCmd}
 
 # Stage 2: Serve with Nginx
 FROM nginx:alpine

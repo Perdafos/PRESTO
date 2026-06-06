@@ -24,6 +24,10 @@ export class DetectorService {
       throw new Error(`Source directory does not exist: ${sourceDir}`);
     }
 
+    const deployment = db.getDeployment(deploymentId);
+    const project = deployment ? db.getProject(deployment.project_id) : undefined;
+    const forcedFramework = project ? project.framework : undefined;
+
     const rootFiles = fs.readdirSync(sourceDir);
     db.appendDeploymentLog(deploymentId, `Root directory contents: ${rootFiles.join(', ')}`);
 
@@ -116,27 +120,37 @@ export class DetectorService {
     let framework: DetectedFramework = 'REACT';
     let internalPort = 80; // React Nginx default
 
-    if (laravelScore >= 15) {
-      if (isInertia) {
-        framework = 'LARAVEL_INERTIA';
-        db.appendDeploymentLog(deploymentId, `Detected Framework: Laravel with InertiaJS`);
+    if (forcedFramework && forcedFramework !== 'AUTO') {
+      framework = forcedFramework as DetectedFramework;
+      db.appendDeploymentLog(deploymentId, `Forcing framework selection to: ${framework} (from project configuration)`);
+      if (framework === 'NEXTJS') {
+        internalPort = 3000;
       } else {
-        framework = 'LARAVEL';
-        db.appendDeploymentLog(deploymentId, `Detected Framework: Pure Laravel`);
+        internalPort = 80;
       }
-      internalPort = 80; // Laravel runs Nginx/FPM exposing port 80
-    } else if (nextScore >= 15) {
-      framework = 'NEXTJS';
-      db.appendDeploymentLog(deploymentId, `Detected Framework: Next.js (React SSR)`);
-      internalPort = 3000; // Next.js default start port
-    } else if (reactScore >= 15) {
-      framework = 'REACT';
-      db.appendDeploymentLog(deploymentId, `Detected Framework: React SPA`);
-      internalPort = 80; // React built static files run on Nginx port 80
     } else {
-      db.appendDeploymentLog(deploymentId, `No strong framework signals detected. Defaulting to React SPA.`);
-      framework = 'REACT';
-      internalPort = 80;
+      if (laravelScore >= 15) {
+        if (isInertia) {
+          framework = 'LARAVEL_INERTIA';
+          db.appendDeploymentLog(deploymentId, `Detected Framework: Laravel with InertiaJS`);
+        } else {
+          framework = 'LARAVEL';
+          db.appendDeploymentLog(deploymentId, `Detected Framework: Pure Laravel`);
+        }
+        internalPort = 80; // Laravel runs Nginx/FPM exposing port 80
+      } else if (nextScore >= 15) {
+        framework = 'NEXTJS';
+        db.appendDeploymentLog(deploymentId, `Detected Framework: Next.js (React SSR)`);
+        internalPort = 3000; // Next.js default start port
+      } else if (reactScore >= 15) {
+        framework = 'REACT';
+        db.appendDeploymentLog(deploymentId, `Detected Framework: React SPA`);
+        internalPort = 80; // React built static files run on Nginx port 80
+      } else {
+        db.appendDeploymentLog(deploymentId, `No strong framework signals detected. Defaulting to React SPA.`);
+        framework = 'REACT';
+        internalPort = 80;
+      }
     }
 
     const result: DetectionResult = {

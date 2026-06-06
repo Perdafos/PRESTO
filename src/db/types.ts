@@ -7,6 +7,9 @@ export interface Project {
   branch: string;
   env_vars: string; // Encrypted JSON string of record<string, string>
   created_at: string;
+  framework?: string;
+  domain?: string;
+  port?: number;
 }
 
 export type DeploymentStatus =

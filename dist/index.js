@@ -122,7 +122,7 @@ app.post('/webhook/github', async (c) => {
         commit_sha: commitSha,
         commit_message: commitMessage,
         deployment_branch: project.branch,
-        domain: project.name + '.localpaas.com', // custom internal domain
+        domain: project.domain || (project.name + '.localpaas.com'),
         env_vars_encrypted: project.env_vars
     });
     return c.json({ deployment_id: deploymentId, status: 'queued' }, 202);
@@ -136,7 +136,7 @@ app.get('/api/projects', (c) => {
 app.post('/api/projects', async (c) => {
     try {
         const body = await c.req.json();
-        const { name, repo_full_name, clone_url, is_private, branch, env_vars } = body;
+        const { name, repo_full_name, clone_url, is_private, branch, env_vars, framework, domain, port } = body;
         if (!name || !repo_full_name || !clone_url || !branch) {
             return c.json({ error: 'Missing required parameters.' }, 400);
         }
@@ -151,6 +151,9 @@ app.post('/api/projects', async (c) => {
             is_private: !!is_private,
             branch,
             env_vars: encryptedEnvs,
+            framework: framework || 'AUTO',
+            domain: domain || '',
+            port: port ? parseInt(port, 10) : undefined,
             created_at: new Date().toISOString()
         };
         db_1.db.saveProject(newProject);
@@ -222,7 +225,7 @@ app.post('/api/projects/:id/deploy', async (c) => {
         commit_sha: 'manual',
         commit_message: 'Manual deployment',
         deployment_branch: project.branch,
-        domain: project.name + '.localpaas.com',
+        domain: project.domain || (project.name + '.localpaas.com'),
         env_vars_encrypted: project.env_vars
     });
     return c.json({ deployment_id: deploymentId, status: 'queued' }, 202);
@@ -239,6 +242,12 @@ app.get('/api/sys-stats', async (c) => {
         queueActive: await queue_1.queue.getActiveCount()
     };
     return c.json(stats);
+});
+// Get public configs
+app.get('/api/config', (c) => {
+    return c.json({
+        webhook_secret: config_1.config.WEBHOOK_SECRET
+    });
 });
 // --- Serve Dashboard Frontend ---
 // Mount public assets

@@ -85,9 +85,15 @@ export function startWorker() {
       currentPhase = 'starting';
       db.updateDeploymentStatus(deployment_id, 'starting');
       
-      // 1. Allocate dynamic port
-      allocatedPort = allocateDynamicPort(project_id);
-      db.appendDeploymentLog(deployment_id, `Allocated host port: ${allocatedPort}`);
+      // 1. Allocate dynamic port or use custom port
+      const project = db.getProject(project_id);
+      if (project && project.port) {
+        allocatedPort = parseInt(project.port as any, 10);
+        db.appendDeploymentLog(deployment_id, `Using configured custom host port: ${allocatedPort}`);
+      } else {
+        allocatedPort = allocateDynamicPort(project_id);
+        db.appendDeploymentLog(deployment_id, `Allocated dynamic host port: ${allocatedPort}`);
+      }
 
       // 2. Decrypt environment variables
       let envVars: Record<string, string> = {};
