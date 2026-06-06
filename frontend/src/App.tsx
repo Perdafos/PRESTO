@@ -63,7 +63,7 @@ interface EnvRow {
 
 export default function App() {
   // --- STATE ---
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'projects' | 'webhook-sim'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'projects'>('dashboard');
   const [projects, setProjects] = useState<Project[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
@@ -95,11 +95,7 @@ export default function App() {
   });
   const [envRows, setEnvRows] = useState<EnvRow[]>([{ key: '', value: '' }]);
 
-  // Webhook Simulator State
-  const [simProject, setSimProject] = useState('');
-  const [simBranch, setSimBranch] = useState('main');
-  const [simCommitMsg, setSimCommitMsg] = useState('');
-  const [simPusher, setSimPusher] = useState('github-dev');
+
 
   // Refs
   const logEndRef = useRef<HTMLDivElement | null>(null);
@@ -289,51 +285,7 @@ export default function App() {
     }
   };
 
-  const handleDispatchWebhook = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const project = projects.find(p => p.id === simProject);
-    if (!project) return;
 
-    const payload = {
-      ref: `refs/heads/${simBranch}`,
-      after: 'sha256_' + Math.random().toString(36).substring(2, 9),
-      deleted: false,
-      head_commit: {
-        message: simCommitMsg
-      },
-      repository: {
-        full_name: project.repo_full_name,
-        clone_url: project.clone_url
-      },
-      pusher: {
-        name: simPusher
-      }
-    };
-
-    try {
-      const res = await fetch('/webhook/github', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-GitHub-Event': 'push',
-          'X-GitHub-Delivery': 'uuid_' + Math.random().toString(36).substring(2, 15)
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.status === 202) {
-        const data = await res.json();
-        alert(`Simulated webhook accepted. Deployment: ${data.deployment_id}`);
-        setCurrentTab('dashboard');
-        setTimeout(() => setSelectedDeploymentId(data.deployment_id), 300);
-      } else {
-        const data = await res.json();
-        alert(`Webhook rejected: ${data.error || res.statusText}`);
-      }
-    } catch (err: any) {
-      alert(`Webhook post failed: ${err.message}`);
-    }
-  };
 
   // --- ENV VAR ROW BUILDER ---
   const addEnvRow = () => setEnvRows(prev => [...prev, { key: '', value: '' }]);
@@ -412,16 +364,6 @@ export default function App() {
             >
               <Folder className="w-4 h-4" /> Projects
             </button>
-            <button
-              onClick={() => setCurrentTab('webhook-sim')}
-              className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
-                currentTab === 'webhook-sim'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
-              }`}
-            >
-              <Plug className="w-4 h-4" /> Webhook Simulator
-            </button>
           </nav>
         </div>
 
@@ -466,7 +408,6 @@ export default function App() {
           <h1 className="text-2xl font-bold tracking-tight">
             {currentTab === 'dashboard' && 'PaaS Deployment Dashboard'}
             {currentTab === 'projects' && 'Registered Projects'}
-            {currentTab === 'webhook-sim' && 'Webhook Simulator Testing'}
           </h1>
           
           <div className="flex items-center gap-3">
@@ -651,87 +592,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab content: Webhook Simulator */}
-        {currentTab === 'webhook-sim' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="lg:col-span-7 bg-card border border-border rounded-xl p-6 shadow-sm">
-              <div className="mb-4 pb-2 border-b border-border">
-                <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-muted-foreground" /> Dispatch Mock GitHub Webhook
-                </h3>
-              </div>
-              <form onSubmit={handleDispatchWebhook} className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Target Project</label>
-                  <select
-                    value={simProject}
-                    onChange={(e) => setSimProject(e.target.value)}
-                    className="w-full bg-transparent border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    required
-                  >
-                    <option value="">-- Select Project --</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.repo_full_name})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Branch</label>
-                  <input
-                    type="text"
-                    value={simBranch}
-                    onChange={(e) => setSimBranch(e.target.value)}
-                    className="w-full bg-transparent border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Commit Message</label>
-                  <input
-                    type="text"
-                    value={simCommitMsg}
-                    onChange={(e) => setSimCommitMsg(e.target.value)}
-                    placeholder="e.g. feat: add payment gateways"
-                    className="w-full bg-transparent border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Pusher Name</label>
-                  <input
-                    type="text"
-                    value={simPusher}
-                    onChange={(e) => setSimPusher(e.target.value)}
-                    className="w-full bg-transparent border border-input rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                    required
-                  />
-                </div>
-                
-                <button
-                  type="submit"
-                  className="bg-primary text-primary-foreground hover:bg-primary w-full py-2.5 rounded-lg font-medium text-sm inline-flex justify-center items-center gap-2 cursor-pointer"
-                >
-                  <Zap className="w-4 h-4" /> Dispatch Push Event Webhook
-                </button>
-              </form>
-            </div>
-            
-            <div className="lg:col-span-5 bg-card border border-border rounded-xl p-6 shadow-sm">
-              <div className="mb-4 pb-2 border-b border-border">
-                <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-muted-foreground" /> About GitHub Webhooks
-                </h3>
-              </div>
-              <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
-                <p>In production, add your platform URL to your GitHub repository settings under <strong>Webhooks</strong>:</p>
-                <pre className="bg-muted text-foreground p-4 border border-border rounded-lg font-mono text-xs overflow-x-auto">
-                  {`Payload URL: http://<your-domain>/webhook/github\nContent type: application/json\nSecret: <configured_webhook_secret>`}
-                </pre>
-                <p>This simulator constructs a payload, generates matching GitHub HTTP headers, and POSTs directly to the endpoint, testing the entire backend pipeline (verification, queues, build, and health checks) in one click.</p>
-              </div>
-            </div>
-          </div>
-        )}
+
       </main>
 
       {/* Create Project Modal */}
