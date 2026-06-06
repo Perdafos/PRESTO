@@ -65,37 +65,96 @@ check_and_fix_lxc_containerd() {
   fi
 
   if [ "$is_lxc" = true ]; then
-    echo -e "${YELLOW}[!] LXC virtualization detected. Checking containerd version compatibility...${NC}"
+    echo -e "${YELLOW}[!] LXC virtualization detected. Checking containerd compatibility...${NC}"
+    
+    local pkg_name=""
     if dpkg -s containerd.io >/dev/null 2>&1; then
-      local version=$(dpkg-query --showformat='${Version}' --show containerd.io)
-      echo -e "${CYAN}[*] Installed containerd.io version: $version${NC}"
+      pkg_name="containerd.io"
+    elif dpkg -s containerd >/dev/null 2>&1; then
+      pkg_name="containerd"
+    fi
+
+    if [ -n "$pkg_name" ]; then
+      local version=$(dpkg-query --showformat='${Version}' --show "$pkg_name")
+      echo -e "${CYAN}[*] Installed $pkg_name version: $version${NC}"
       
-      if dpkg --compare-versions "$version" "ge" "1.7.28-2"; then
-        echo -e "${YELLOW}[!] Problematic containerd.io version ($version) detected inside LXC.${NC}"
-        echo -e "${CYAN}[*] Downgrading containerd.io to a safe version (1.7.28-1) to avoid permission errors...${NC}"
+      if dpkg --compare-versions "$version" "ge" "1.7.28-2" || [[ "$version" == *"+u"* ]]; then
+        echo -e "${YELLOW}[!] Problematic containerd version ($version) detected inside LXC.${NC}"
+        echo -e "${CYAN}[*] Preparing to install/downgrade to a safe version of containerd.io (1.7.28-1)...${NC}"
         
-        # Check available versions in repository
-        local pkg_ver=$(apt-cache madison containerd.io | grep "1.7.28-1" | head -n1 | awk '{print $3}')
+        # Ensure Docker official repository is added to get containerd.io
+        if [ ! -f "/etc/apt/sources.list.d/docker.list" ]; then
+          echo -e "${CYAN}[*] Adding Docker official GPG key and repository...${NC}"
+          sudo mkdir -p /etc/apt/keyrings
+          
+          local dist="ubuntu"
+          if [ -f /etc/os-release ] && grep -q -i "debian" /etc/os-release; then
+            dist="debian"
+          fi
+          
+          sudo curl -fsSL "https://download.docker.com/linux/$dist/gpg" -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
+          sudo chmod a+r /etc/apt/keyrings/docker.asc 2>/dev/null || true
+          
+          local codename=$(lsb_release -cs)
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$dist $codename stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update -y
+        fi
+        
+        # Check safe containerd.io version in apt cache
+        local pkg_ver=$(apt-cache madison containerd.io | grep "1.7.28-1" | head -n1 | awk '{print $3}' || true)
         if [ -n "$pkg_ver" ]; then
-          echo -e "${CYAN}[*] Found version: $pkg_ver. Installing...${NC}"
+          echo -e "${CYAN}[*] Found safe version: $pkg_ver. Swapping and installing...${NC}"
+          if [ "$pkg_name" = "containerd" ]; then
+            sudo apt-get remove -y containerd || true
+          fi
           sudo apt-get install -y --allow-downgrades containerd.io="$pkg_ver"
           sudo apt-mark hold containerd.io
           sudo systemctl restart docker || true
-          echo -e "${GREEN}[✓] containerd.io successfully downgraded and pinned.${NC}"
+          echo -e "${GREEN}[✓] containerd.io successfully installed, downgraded, and pinned.${NC}"
         else
-          echo -e "${RED}[!] Could not find containerd.io=1.7.28-1 in apt cache. Trying fallback pattern...${NC}"
           local fallback_ver=$(apt-cache madison containerd.io | grep -oE "1\.7\.28-1~[a-zA-Z0-9\.]+" | head -n1 || true)
           if [ -n "$fallback_ver" ]; then
+            if [ "$pkg_name" = "containerd" ]; then
+              sudo apt-get remove -y containerd || true
+            fi
             sudo apt-get install -y --allow-downgrades containerd.io="$fallback_ver"
             sudo apt-mark hold containerd.io
             sudo systemctl restart docker || true
+            echo -e "${GREEN}[✓] containerd.io successfully installed, downgraded, and pinned.${NC}"
           else
-            echo -e "${RED}[!] Automatic downgrade failed. If the build continues to fail, please enable Nesting for this LXC container on the Proxmox host.${NC}"
+            echo -e "${RED}[!] Could not find containerd.io=1.7.28-1 in apt cache. Attempting manual download & install...${NC}"
+            # Attempt to download directly from Docker package pool
+            local codename=$(lsb_release -cs)
+            local dist="ubuntu"
+            if [ -f /etc/os-release ] && grep -q -i "debian" /etc/os-release; then
+              dist="debian"
+            fi
+            local arch=$(dpkg --print-architecture)
+            
+            # Form URL for direct download
+            local dl_url="https://download.docker.com/linux/$dist/dists/$codename/pool/stable/$arch/containerd.io_1.7.28-1_amd64.deb"
+            if [ "$arch" != "amd64" ]; then
+              dl_url="https://download.docker.com/linux/$dist/dists/$codename/pool/stable/$arch/containerd.io_1.7.28-1_$arch.deb"
+            fi
+            
+            echo -e "${CYAN}[*] Downloading from $dl_url ...${NC}"
+            if wget -q -O /tmp/containerd.deb "$dl_url"; then
+              if [ "$pkg_name" = "containerd" ]; then
+                sudo apt-get remove -y containerd || true
+              fi
+              sudo dpkg -i /tmp/containerd.deb || sudo apt-get install -f -y
+              sudo apt-mark hold containerd.io
+              sudo systemctl restart docker || true
+              echo -e "${GREEN}[✓] containerd.io manually downloaded, installed, and pinned.${NC}"
+            else
+              echo -e "${RED}[!] Direct download failed. Please enable Nesting features of your LXC container or set AppArmor to unconfined on your host Proxmox server.${NC}"
+            fi
           fi
         fi
       fi
     else
-      echo -e "${GREEN}[✓] containerd.io package is not installed (using standard system package).${NC}"
+      echo -e "${GREEN}[✓] No containerd package detected.${NC}"
     fi
   fi
 }
