@@ -202,13 +202,17 @@ export class DetectorService {
   // --- Dockerfile Templates ---
 
   private getReactDockerfile(nodeVer: string, buildCmd: string): string {
+    const runCmd = (buildCmd.startsWith('npm') || buildCmd.startsWith('npx') || buildCmd.startsWith('yarn') || buildCmd.startsWith('pnpm'))
+      ? buildCmd
+      : 'npm run build';
+
     return `# Stage 1: Build React static files
 FROM node:${nodeVer}-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci || npm install
 COPY . .
-RUN ${buildCmd}
+RUN ${runCmd}
 
 # Stage 2: Serve with Nginx
 FROM nginx:alpine
