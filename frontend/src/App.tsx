@@ -14,7 +14,11 @@ import {
   Monitor,
   Lock,
   Globe,
-  PlusCircle
+  PlusCircle,
+  BookOpen,
+  Code2,
+  Copy,
+  Check
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -60,7 +64,7 @@ interface EnvRow {
 
 export default function App() {
   // --- STATE ---
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'projects'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'projects' | 'integration'>('dashboard');
   const [projects, setProjects] = useState<Project[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
@@ -91,8 +95,8 @@ export default function App() {
     branch: 'main'
   });
   const [envRows, setEnvRows] = useState<EnvRow[]>([{ key: '', value: '' }]);
-
-
+  const [webhookSecret, setWebhookSecret] = useState<string>('');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Refs
   const logEndRef = useRef<HTMLDivElement | null>(null);
@@ -139,11 +143,24 @@ export default function App() {
     }
   };
 
+  const loadConfig = async () => {
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) {
+        const data = await res.json();
+        setWebhookSecret(data.webhook_secret || '');
+      }
+    } catch (err) {
+      console.warn('Failed to load config:', err);
+    }
+  };
+
   // --- WEBSOCKET CONNECTION ---
   useEffect(() => {
     loadProjects();
     loadDeployments();
     updateStats();
+    loadConfig();
     
     // Stats polling
     const statsInterval = setInterval(updateStats, 5000);
@@ -282,7 +299,80 @@ export default function App() {
     }
   };
 
+  const [subTab, setSubTab] = useState<'webhook' | 'github-actions' | 'bash'>('webhook');
 
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => {
+      setCopiedKey(null);
+    }, 2000);
+  };
+
+  const githubActionsYaml = `name: Deploy to PRESTO
+on:
+  push:
+    branches:
+      - main  # change to your branch
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PRESTO Build
+        run: |
+          curl -X POST \\
+            -H "Content-Type: application/json" \\
+            -H "X-GitHub-Event: push" \\
+            -H "X-GitHub-Delivery: gha-\${{ github.run_id }}" \\
+            -d '{
+              "ref": "\${{ github.ref }}",
+              "after": "\${{ github.sha }}",
+              "repository": {
+                "full_name": "\${{ github.repository }}",
+                "clone_url": "https://github.com/\${{ github.repository }}.git"
+              },
+              "pusher": {
+                "name": "\${{ github.actor }}"
+              },
+              "head_commit": {
+                "message": "\${{ github.event.head_commit.message || '\''Manual GHA Deploy'\'' }}"
+              }
+            }' \\
+            ${window.location.origin}/webhook/github`;
+
+  const localBashScript = `#!/bin/bash
+# Local deploy script for PRESTO
+
+PRESTO_URL="${window.location.origin}/webhook/github"
+REPO_NAME="username/repo-name"  # Matches your project Repo Name in PRESTO
+CLONE_URL="https://github.com/username/repo-name.git"
+BRANCH="main"
+COMMIT_MSG=\$(git log -1 --pretty=%B 2>/dev/null || echo "Manual deploy")
+COMMIT_SHA=\$(git rev-parse HEAD 2>/dev/null || echo "manual-\$(date +%s)")
+PUSHER="local-developer"
+
+echo "🚀 Triggering deployment to PRESTO..."
+curl -X POST \\
+  -H "Content-Type: application/json" \\
+  -H "X-GitHub-Event: push" \\
+  -H "X-GitHub-Delivery: local-\$(date +%s)" \\
+  -d "{
+    \\"ref\\": \\"refs/heads/\$BRANCH\\",
+    \\"after\\": \\"\$COMMIT_SHA\\",
+    \\"repository\\": {
+      \\"full_name\\": \\"\$REPO_NAME\\",
+      \\"clone_url\\": \\"\$CLONE_URL\\"
+    },
+    \\"pusher\\": {
+      \\"name\\": \\"\$PUSHER\\"
+    },
+    \\"head_commit\\": {
+      \\"message\\": \\"\$COMMIT_MSG\\"
+    }
+  }" \\
+  \$PRESTO_URL
+
+echo -e "\\n✅ Deployment request sent!"`;
 
   // --- ENV VAR ROW BUILDER ---
   const addEnvRow = () => setEnvRows(prev => [...prev, { key: '', value: '' }]);
@@ -361,6 +451,16 @@ export default function App() {
             >
               <Folder className="w-4 h-4" /> Projects
             </button>
+            <button
+              onClick={() => setCurrentTab('integration')}
+              className={`menu-item w-full text-left flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium cursor-pointer ${
+                currentTab === 'integration'
+                  ? 'bg-accent text-accent-foreground'
+                  : 'hover:bg-accent hover:text-accent-foreground text-muted-foreground'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" /> Deploy Scripts
+            </button>
           </nav>
         </div>
 
@@ -405,6 +505,7 @@ export default function App() {
           <h1 className="text-2xl font-bold tracking-tight">
             {currentTab === 'dashboard' && 'PaaS Deployment Dashboard'}
             {currentTab === 'projects' && 'Registered Projects'}
+            {currentTab === 'integration' && 'CI/CD & Deploy Scripts'}
           </h1>
           
           <div className="flex items-center gap-3">
@@ -589,7 +690,178 @@ export default function App() {
           </div>
         )}
 
+        {/* Tab content: Integration / Deploy Scripts */}
+        {currentTab === 'integration' && (
+          <div className="space-y-6 max-w-4xl">
+            <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+              <h3 className="font-semibold text-lg text-foreground flex items-center gap-2 mb-2">
+                <Code2 className="w-5 h-5 text-primary" /> CI/CD Deployment Integration
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
+                PRESTO runs deployments automatically when receiving standard GitHub push webhooks. 
+                Choose one of the methods below to connect your repository and automate your builds.
+              </p>
 
+              {/* Sub tabs selection */}
+              <div className="flex gap-4 mt-6 border-b border-border pb-px">
+                <button
+                  onClick={() => setSubTab('webhook')}
+                  className={`pb-2.5 px-1 text-sm font-medium border-b-2 transition-all cursor-pointer ${
+                    subTab === 'webhook'
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  GitHub Webhook (Recommended)
+                </button>
+                <button
+                  onClick={() => setSubTab('github-actions')}
+                  className={`pb-2.5 px-1 text-sm font-medium border-b-2 transition-all cursor-pointer ${
+                    subTab === 'github-actions'
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  GitHub Actions (CI/CD Workflow)
+                </button>
+                <button
+                  onClick={() => setSubTab('bash')}
+                  className={`pb-2.5 px-1 text-sm font-medium border-b-2 transition-all cursor-pointer ${
+                    subTab === 'bash'
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Local Deploy Script (deploy.sh)
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="mt-6">
+                {subTab === 'webhook' && (
+                  <div className="space-y-4 text-sm">
+                    <p className="text-muted-foreground leading-relaxed">
+                      Add a webhook directly in your GitHub Repository Settings to trigger deployments automatically on every <code>git push</code>.
+                    </p>
+                    <div className="space-y-3 bg-muted border border-border rounded-lg p-5">
+                      <div>
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Payload URL</span>
+                        <div className="flex items-center gap-2 font-mono text-xs text-foreground bg-card border border-border px-3 py-2 rounded-md justify-between">
+                          <span className="truncate">{window.location.origin}/webhook/github</span>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(`${window.location.origin}/webhook/github`, 'webhook-url')}
+                            className="text-muted-foreground hover:text-foreground p-1 transition-all cursor-pointer"
+                            title="Copy URL"
+                          >
+                            {copiedKey === 'webhook-url' ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Content type</span>
+                          <div className="font-mono text-xs text-foreground bg-card border border-border px-3 py-2 rounded-md">
+                            application/json
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Secret (Webhook Secret)</span>
+                          <div className="flex items-center gap-2 font-mono text-xs text-foreground bg-card border border-border px-3 py-2 rounded-md justify-between">
+                            <span className="truncate">{webhookSecret || '(Configured in your .env)'}</span>
+                            {webhookSecret && (
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(webhookSecret, 'webhook-secret')}
+                                className="text-muted-foreground hover:text-foreground p-1 transition-all cursor-pointer"
+                                title="Copy Secret"
+                              >
+                                {copiedKey === 'webhook-secret' ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Which events would you like to trigger this webhook?</span>
+                        <div className="text-xs text-foreground font-medium flex items-center gap-1.5 mt-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-success"></span> Just the <code>push</code> event.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="pt-2">
+                      <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-2">Instructions</h4>
+                      <ol className="list-decimal list-inside space-y-1.5 text-xs text-muted-foreground">
+                        <li>Go to your GitHub Repository -> <strong>Settings</strong> -> <strong>Webhooks</strong> -> <strong>Add webhook</strong>.</li>
+                        <li>Paste the <strong>Payload URL</strong> and set <strong>Content type</strong> to <code>application/json</code>.</li>
+                        <li>Enter the <strong>Secret</strong> from above.</li>
+                        <li>Click <strong>Add webhook</strong>. Any push to your configured branch will now trigger a deployment!</li>
+                      </ol>
+                    </div>
+                  </div>
+                )}
+
+                {subTab === 'github-actions' && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      If you want to deploy using a GitHub Actions workflow (useful for private repositories or custom CI pipelines), 
+                      create a file at <code>.github/workflows/presto.yml</code> and paste the content below:
+                    </p>
+                    <div className="relative">
+                      <pre className="bg-muted border border-border text-foreground p-4 rounded-lg font-mono text-[11px] overflow-x-auto max-h-[350px]">
+                        {githubActionsYaml}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(githubActionsYaml, 'github-actions')}
+                        className="absolute top-3 right-3 bg-card border border-border text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1 cursor-pointer transition-all"
+                      >
+                        {copiedKey === 'github-actions' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-success" /> Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> Copy Code
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {subTab === 'bash' && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      To deploy directly from your local terminal or a custom shell runner, place the following script 
+                      in the root of your repository as <code>deploy.sh</code>. Make it executable using <code>chmod +x deploy.sh</code> and run it with <code>./deploy.sh</code>.
+                    </p>
+                    <div className="relative">
+                      <pre className="bg-muted border border-border text-foreground p-4 rounded-lg font-mono text-[11px] overflow-x-auto max-h-[350px]">
+                        {localBashScript}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(localBashScript, 'local-bash')}
+                        className="absolute top-3 right-3 bg-card border border-border text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-md text-xs font-medium inline-flex items-center gap-1 cursor-pointer transition-all"
+                      >
+                        {copiedKey === 'local-bash' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-success" /> Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> Copy Code
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Create Project Modal */}

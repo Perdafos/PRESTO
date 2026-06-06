@@ -274,6 +274,13 @@ app.get('/api/sys-stats', async (c) => {
   return c.json(stats);
 });
 
+// Get public configs
+app.get('/api/config', (c) => {
+  return c.json({
+    webhook_secret: config.WEBHOOK_SECRET
+  });
+});
+
 // --- Serve Dashboard Frontend ---
 // Mount public assets
 app.use('/*', serveStatic({ root: './frontend/dist' }));
