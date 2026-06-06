@@ -13,15 +13,17 @@ services:
     container_name: presto-app
     restart: unless-stopped
     environment:
-      - PORT=3000
-      - REDIS_HOST=presto-redis
-      - REDIS_PORT=6379
-      - NGINX_CONF_DIR=/app/nginx/conf.d
-      - NGINX_UPSTREAM_HOST=host.docker.internal
-      - NGINX_RELOAD_CMD=docker exec presto-nginx nginx -s reload
-      # Ensure you change these in production
-      - WEBHOOK_SECRET=github_webhook_secret_key_here
-      - ENCRYPTION_KEY=my_secure_32_char_encryption_key_
+      - PORT=${PORT:-3000}
+      - REDIS_HOST=${REDIS_HOST:-presto-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - MAX_CONCURRENT_BUILDS=${MAX_CONCURRENT_BUILDS:-3}
+      - PORT_RANGE_START=${PORT_RANGE_START:-10000}
+      - PORT_RANGE_END=${PORT_RANGE_END:-20000}
+      - NGINX_CONF_DIR=${NGINX_CONF_DIR:-/app/nginx/conf.d}
+      - NGINX_UPSTREAM_HOST=${NGINX_UPSTREAM_HOST:-host.docker.internal}
+      - NGINX_RELOAD_CMD=${NGINX_RELOAD_CMD:-docker exec presto-nginx nginx -s reload}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
     volumes:
       # Mount host docker socket to manage containers on host
       - /var/run/docker.sock:/var/run/docker.sock
