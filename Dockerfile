@@ -16,6 +16,7 @@ RUN apk add --no-cache docker-cli git openssh-client
 # Copy package files and install backend dependencies
 COPY package*.json ./
 RUN npm ci
+RUN chmod +x node_modules/.bin/tsc
 
 # Copy backend source code and tsconfig
 COPY tsconfig.json ./

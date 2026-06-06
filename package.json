@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "dev:frontend": "npm run dev --prefix frontend",
-    "build": "npm run build --prefix frontend && npx tsc",
+    "build": "npm run build --prefix frontend && chmod +x node_modules/.bin/tsc && npx tsc",
     "start": "node dist/index.js",
     "postinstall": "npm install --prefix frontend"
   },
