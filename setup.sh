@@ -56,6 +56,50 @@ check_system() {
   fi
 }
 
+check_and_fix_lxc_containerd() {
+  local is_lxc=false
+  if [ -f /proc/1/environ ] && grep -q "container=lxc" /proc/1/environ; then
+    is_lxc=true
+  elif command_exists systemd-detect-virt && systemd-detect-virt --container | grep -q "lxc"; then
+    is_lxc=true
+  fi
+
+  if [ "$is_lxc" = true ]; then
+    echo -e "${YELLOW}[!] LXC virtualization detected. Checking containerd version compatibility...${NC}"
+    if dpkg -s containerd.io >/dev/null 2>&1; then
+      local version=$(dpkg-query --showformat='${Version}' --show containerd.io)
+      echo -e "${CYAN}[*] Installed containerd.io version: $version${NC}"
+      
+      if dpkg --compare-versions "$version" "ge" "1.7.28-2"; then
+        echo -e "${YELLOW}[!] Problematic containerd.io version ($version) detected inside LXC.${NC}"
+        echo -e "${CYAN}[*] Downgrading containerd.io to a safe version (1.7.28-1) to avoid permission errors...${NC}"
+        
+        # Check available versions in repository
+        local pkg_ver=$(apt-cache madison containerd.io | grep "1.7.28-1" | head -n1 | awk '{print $3}')
+        if [ -n "$pkg_ver" ]; then
+          echo -e "${CYAN}[*] Found version: $pkg_ver. Installing...${NC}"
+          sudo apt-get install -y --allow-downgrades containerd.io="$pkg_ver"
+          sudo apt-mark hold containerd.io
+          sudo systemctl restart docker || true
+          echo -e "${GREEN}[✓] containerd.io successfully downgraded and pinned.${NC}"
+        else
+          echo -e "${RED}[!] Could not find containerd.io=1.7.28-1 in apt cache. Trying fallback pattern...${NC}"
+          local fallback_ver=$(apt-cache madison containerd.io | grep -oE "1\.7\.28-1~[a-zA-Z0-9\.]+" | head -n1 || true)
+          if [ -n "$fallback_ver" ]; then
+            sudo apt-get install -y --allow-downgrades containerd.io="$fallback_ver"
+            sudo apt-mark hold containerd.io
+            sudo systemctl restart docker || true
+          else
+            echo -e "${RED}[!] Automatic downgrade failed. If the build continues to fail, please enable Nesting for this LXC container on the Proxmox host.${NC}"
+          fi
+        fi
+      fi
+    else
+      echo -e "${GREEN}[✓] containerd.io package is not installed (using standard system package).${NC}"
+    fi
+  fi
+}
+
 install_docker() {
   print_header "Step 1: Installing Docker & Docker Compose"
 
@@ -83,6 +127,9 @@ install_docker() {
     sudo apt-get install -y docker-compose
     echo -e "${GREEN}[✓] Docker Compose installed successfully.${NC}"
   fi
+
+  # Apply containerd LXC downgrade fix if needed
+  check_and_fix_lxc_containerd
 
   # Configure Docker Group
   if [ -n "$SUDO_USER" ]; then
