@@ -792,7 +792,7 @@ echo -e "\\n✅ Deployment request sent!"`;
                     <div className="pt-2">
                       <h4 className="font-semibold text-xs uppercase tracking-wider text-muted-foreground mb-2">Instructions</h4>
                       <ol className="list-decimal list-inside space-y-1.5 text-xs text-muted-foreground">
-                        <li>Go to your GitHub Repository -> <strong>Settings</strong> -> <strong>Webhooks</strong> -> <strong>Add webhook</strong>.</li>
+                        <li>Go to your GitHub Repository &rarr; <strong>Settings</strong> &rarr; <strong>Webhooks</strong> &rarr; <strong>Add webhook</strong>.</li>
                         <li>Paste the <strong>Payload URL</strong> and set <strong>Content type</strong> to <code>application/json</code>.</li>
                         <li>Enter the <strong>Secret</strong> from above.</li>
                         <li>Click <strong>Add webhook</strong>. Any push to your configured branch will now trigger a deployment!</li>
